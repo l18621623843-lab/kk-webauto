@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.web.WebView?>
+
+
+
+<BorderPane xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.kk.ui.controller.MainController"
+            prefHeight="800.0" prefWidth="1200.0">
+
+    <!-- 顶部菜单栏 -->
+    <top>
+        <VBox>
+            <MenuBar>
+                <Menu text="文件(_F)">
+                    <MenuItem text="保存任务" onAction="#handleSaveTask" accelerator="Ctrl+S"/>
+                    <MenuItem text="加载任务" onAction="#handleLoadTask" accelerator="Ctrl+O"/>
+                    <SeparatorMenuItem/>
+                    <MenuItem text="退出" onAction="#handleExit"/>
+                </Menu>
+                <Menu text="帮助(_H)">
+                    <MenuItem text="关于" onAction="#handleAbout"/>
+                </Menu>
+            </MenuBar>
+
+            <!-- 任务配置区域 -->
+            <TitledPane text="任务配置" collapsible="false">
+                <GridPane hgap="10" vgap="10">
+                    <padding>
+                        <Insets top="10" right="10" bottom="10" left="10"/>
+                    </padding>
+
+                    <Label text="目标URL:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                    <TextField fx:id="urlTextField" GridPane.rowIndex="0" GridPane.columnIndex="1"
+                               GridPane.hgrow="ALWAYS"/>
+
+                    <Label text="运行模式:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                    <CheckBox fx:id="headlessCheckBox" text="无头模式 (后台运行)"
+                              GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+
+                    <columnConstraints>
+                        <ColumnConstraints percentWidth="15"/>
+                        <ColumnConstraints percentWidth="85"/>
+                    </columnConstraints>
+                </GridPane>
+            </TitledPane>
+        </VBox>
+    </top>
+
+    <!-- 中间内容区域 -->
+    <center>
+        <TabPane tabClosingPolicy="UNAVAILABLE">
+            <!-- 任务编辑器标签页 -->
+            <Tab text="任务编辑器">
+                <VBox spacing="8">
+                    <padding>
+                        <Insets top="8" right="10" bottom="8" left="10"/>
+                    </padding>
+
+                    <ToolBar>
+                        <ToggleButton fx:id="visualEditorToggle" text="可视化编排" onAction="#handleToggleVisualEditor"/>
+                        <Separator/>
+                        <Button text="从步骤同步到画布" onAction="#handleSyncStepsToGraph"/>
+                    </ToolBar>
+
+                    <StackPane fx:id="editorStackPane" VBox.vgrow="ALWAYS">
+                        <SplitPane fx:id="listEditorSplitPane" dividerPositions="0.5">
+                            <!-- 左侧 - 步骤配置 -->
+                            <TitledPane text="添加步骤" collapsible="false">
+                                <VBox spacing="10">
+                                    <padding>
+                                        <Insets top="10" right="10" bottom="10" left="10"/>
+                                    </padding>
+
+                                    <HBox spacing="10" alignment="CENTER_LEFT">
+                                        <Label text="操作类型:" minWidth="80"/>
+                                        <ComboBox fx:id="actionComboBox" HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+                                    </HBox>
+
+                                    <HBox spacing="10" alignment="CENTER_LEFT">
+                                        <Label text="CSS选择器:" minWidth="80"/>
+                                        <TextField fx:id="selectorTextField" HBox.hgrow="ALWAYS"/>
+                                    </HBox>
+
+                                    <VBox spacing="5">
+                                        <Label text="值/脚本:"/>
+                                        <TextArea fx:id="valueTextArea" prefRowCount="5" VBox.vgrow="ALWAYS"/>
+                                    </VBox>
+
+                                    <HBox spacing="10" alignment="CENTER">
+                                        <Button fx:id="addStepButton" text="➕ 添加到任务" onAction="#handleAddStep"
+                                                HBox.hgrow="ALWAYS" maxWidth="Infinity" style="-fx-font-size: 14px;"/>
+                                        <Button fx:id="cancelEditButton" text="取消" onAction="#handleCancelEdit"
+                                                HBox.hgrow="ALWAYS" maxWidth="Infinity" style="-fx-font-size: 14px;"/>
+                                    </HBox>
+                                </VBox>
+                            </TitledPane>
+
+                            <!-- 右侧 - 任务步骤列表 -->
+                            <VBox spacing="10">
+                                <padding>
+                                    <Insets top="10" right="10" bottom="10" left="10"/>
+                                </padding>
+
+                                <Label text="任务步骤列表" style="-fx-font-weight: bold;"/>
+                                <ListView fx:id="stepListView" VBox.vgrow="ALWAYS" onMouseClicked="#handleStepListClick"/>
+
+                                <HBox spacing="10" alignment="CENTER">
+                                    <Button text="⬆ 上移" onAction="#handleMoveUp" HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+                                    <Button text="⬇ 下移" onAction="#handleMoveDown" HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+                                    <Button text="🗑 删除" onAction="#handleRemoveStep" HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+                                </HBox>
+                            </VBox>
+                        </SplitPane>
+
+                        <BorderPane fx:id="visualEditorPane" visible="false" managed="false">
+                            <center>
+                                <WebView fx:id="flowWebView"/>
+                            </center>
+
+                        </BorderPane>
+                    </StackPane>
+                </VBox>
+            </Tab>
+
+            <!-- 任务历史标签页 -->
+            <Tab text="任务历史">
+                <TableView fx:id="taskHistoryTable">
+                    <columns>
+                        <TableColumn fx:id="nameColumn" text="任务名称" prefWidth="300"/>
+                        <TableColumn fx:id="statusColumn" text="状态" prefWidth="150"/>
+                        <TableColumn fx:id="stepsColumn" text="步骤数" prefWidth="100"/>
+                    </columns>
+                </TableView>
+            </Tab>
+
+            <!-- 执行日志标签页 -->
+            <Tab text="执行日志">
+                <TextArea fx:id="logTextArea" editable="false"
+                          style="-fx-font-family: 'Consolas', 'Monaco', monospace;"/>
+            </Tab>
+        </TabPane>
+    </center>
+
+    <!-- 底部按钮区域 -->
+    <bottom>
+        <VBox>
+            <HBox spacing="10" alignment="CENTER">
+                <padding>
+                    <Insets top="10" right="10" bottom="10" left="10"/>
+                </padding>
+
+                <Button text="▶ 执行任务" onAction="#handleExecuteTask"
+                        HBox.hgrow="ALWAYS" maxWidth="Infinity"
+                        style="-fx-font-size: 14px; -fx-background-color: #4CAF50; -fx-text-fill: white;"/>
+                <Button text="⏹ 停止任务" onAction="#handleStopTask"
+                        HBox.hgrow="ALWAYS" maxWidth="Infinity"
+                        style="-fx-font-size: 14px; -fx-background-color: #f44336; -fx-text-fill: white;"/>
+                <Button text="📋 加载示例" onAction="#handleLoadDemo"
+                        HBox.hgrow="ALWAYS" maxWidth="Infinity"
+                        style="-fx-font-size: 14px;"/>
+                <Button text="🗑 清空列表" onAction="#handleClearSteps"
+                        HBox.hgrow="ALWAYS" maxWidth="Infinity"
+                        style="-fx-font-size: 14px;"/>
+            </HBox>
+
+            <!-- 状态栏 -->
+            <Label text="就绪" style="-fx-padding: 5; -fx-background-color: #f0f0f0;"/>
+        </VBox>
+    </bottom>
+
+</BorderPane>
