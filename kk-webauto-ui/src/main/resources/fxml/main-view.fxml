@@ -117,11 +117,18 @@
                             </VBox>
                         </SplitPane>
 
+                        <!-- 可视化编辑器面板 -->
                         <BorderPane fx:id="visualEditorPane" visible="false" managed="false">
                             <center>
-                                <WebView fx:id="flowWebView"/>
+                                <!-- 关键修改: 确保 WebView 填充整个容器 -->
+                                <AnchorPane>
+                                    <WebView fx:id="flowWebView"
+                                             AnchorPane.topAnchor="0.0"
+                                             AnchorPane.bottomAnchor="0.0"
+                                             AnchorPane.leftAnchor="0.0"
+                                             AnchorPane.rightAnchor="0.0"/>
+                                </AnchorPane>
                             </center>
-
                         </BorderPane>
                     </StackPane>
                 </VBox>

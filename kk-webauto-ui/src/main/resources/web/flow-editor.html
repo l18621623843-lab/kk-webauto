@@ -1,574 +1,599 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>KK WebAuto Flow Editor</title>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>KK WebAuto Flow Editor</title>
 
-  <!-- X6 CSS：优先本地，其次 CDN 兜底 -->
-  <link rel="stylesheet" href="./vendor/x6/x6.css" />
-  <link rel="stylesheet" href="https://unpkg.com/@antv/x6@2.18.1/dist/x6.css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@antv/x6@2.18.1/dist/x6.css" />
-  <link rel="stylesheet" href="https://registry.npmmirror.com/@antv/x6/2.18.1/files/dist/x6.css" />
+    <!-- X6 CSS：优先本地，其次 CDN 兜底 -->
+    <link rel="stylesheet" href="./vendor/x6/x6.css"/>
 
-  <style>
-    :root {
-      --bg: #f4f7ff;
-      --panel: #ffffff;
-      --border: rgba(15, 23, 42, 0.10);
-      --text: #0f172a;
-      --muted: rgba(15, 23, 42, 0.65);
-      --blue: #5F95FF;
-      --shadow: 0 10px 24px rgba(2, 6, 23, 0.08);
-    }
+    <style>
+        :root {
+            --bg: #f4f7ff;
+            --panel: #ffffff;
+            --border: rgba(15, 23, 42, 0.10);
+            --text: #0f172a;
+            --muted: rgba(15, 23, 42, 0.65);
+            --blue: #5F95FF;
+            --shadow: 0 10px 24px rgba(2, 6, 23, 0.08);
+        }
 
-    * { box-sizing: border-box; }
+        * {
+            box-sizing: border-box;
+        }
 
-    html, body {
-      height: 100%;
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      overflow: hidden;
-    }
+        html, body {
+            height: 100%;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+        }
 
-    .layout {
-      height: 100%;
-      display: flex;
-    }
+        .layout {
+            height: 100%;
+            display: flex;
+        }
 
-    /* 左侧：仅保留网页自动化菜单 */
-    .sidebar {
-      width: 280px;
-      background: #f8fbff;
-      border-right: 1px solid var(--border);
-      padding: 14px 10px;
-      overflow: auto;
-      user-select: none;
-    }
+        /* 左侧：仅保留网页自动化菜单 */
+        .sidebar {
+            width: 280px;
+            background: #f8fbff;
+            border-right: 1px solid var(--border);
+            padding: 14px 10px;
+            overflow: auto;
+            user-select: none;
+        }
 
-    .sidebar::-webkit-scrollbar { width: 10px; }
-    .sidebar::-webkit-scrollbar-thumb {
-      background: rgba(15,23,42,.12);
-      border-radius: 999px;
-      border: 3px solid rgba(255,255,255,0.7);
-    }
-    .sidebar::-webkit-scrollbar-track { background: transparent; }
+        .sidebar::-webkit-scrollbar {
+            width: 10px;
+        }
 
-    .sidebar-title {
-      font-size: 14px;
-      font-weight: 800;
-      padding: 6px 10px 12px;
-      color: rgba(15, 23, 42, 0.82);
-    }
+        .sidebar::-webkit-scrollbar-thumb {
+            background: rgba(15, 23, 42, .12);
+            border-radius: 999px;
+            border: 3px solid rgba(255, 255, 255, 0.7);
+        }
 
-    .group {
-      margin-bottom: 10px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid rgba(15, 23, 42, 0.06);
-    }
+        .sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
 
-    .group:last-child { border-bottom: none; }
+        .sidebar-title {
+            font-size: 14px;
+            font-weight: 800;
+            padding: 6px 10px 12px;
+            color: rgba(15, 23, 42, 0.82);
+        }
 
-    .group-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 10px;
-      color: rgba(15, 23, 42, 0.72);
-      font-size: 13px;
-      font-weight: 800;
-      border-radius: 10px;
-    }
+        .group {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+        }
 
-    .group-items {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      padding: 4px 10px 10px;
-    }
+        .group:last-child {
+            border-bottom: none;
+        }
 
-    .node-card {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      padding: 12px 12px;
-      border-radius: 12px;
-      border: 1px solid rgba(95,149,255,0.35);
-      background: #ffffff;
-      box-shadow: 0 8px 18px rgba(2, 6, 23, 0.06);
-      cursor: grab;
-      transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
-    }
+        .group-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            color: rgba(15, 23, 42, 0.72);
+            font-size: 13px;
+            font-weight: 800;
+            border-radius: 10px;
+        }
 
-    .node-card:hover {
-      transform: translateY(-1px);
-      border-color: rgba(95,149,255,0.65);
-      box-shadow: 0 10px 22px rgba(2, 6, 23, 0.08);
-    }
+        .group-items {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 4px 10px 10px;
+        }
 
-    .node-card:active { cursor: grabbing; transform: translateY(0px); }
+        .node-card {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            padding: 12px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(95, 149, 255, 0.35);
+            background: #ffffff;
+            box-shadow: 0 8px 18px rgba(2, 6, 23, 0.06);
+            cursor: grab;
+            transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+        }
 
-    .node-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 12px;
-      background: #F0F5FF;
-      border: 1px solid rgba(95,149,255,0.20);
-      display: grid;
-      place-items: center;
-      font-weight: 800;
-      font-size: 12px;
-      color: #1D39C4;
-      flex: 0 0 auto;
-    }
+        .node-card:hover {
+            transform: translateY(-1px);
+            border-color: rgba(95, 149, 255, 0.65);
+            box-shadow: 0 10px 22px rgba(2, 6, 23, 0.08);
+        }
 
-    .node-meta {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
-      flex: 1;
-    }
+        .node-card:active {
+            cursor: grabbing;
+            transform: translateY(0px);
+        }
 
-    .node-meta .name {
-      font-size: 14px;
-      font-weight: 800;
-      color: rgba(15, 23, 42, 0.90);
-      line-height: 1.2;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+        .node-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 12px;
+            background: #F0F5FF;
+            border: 1px solid rgba(95, 149, 255, 0.20);
+            display: grid;
+            place-items: center;
+            font-weight: 800;
+            font-size: 12px;
+            color: #1D39C4;
+            flex: 0 0 auto;
+        }
 
-    .node-meta .desc {
-      font-size: 12px;
-      color: rgba(15, 23, 42, 0.60);
-      line-height: 1.2;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+        .node-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+            flex: 1;
+        }
 
-    /* 右侧主区：画布 + 步骤列表 */
-    .main {
-      flex: 1;
-      position: relative;
-      overflow: hidden;
-      display: flex;
-    }
+        .node-meta .name {
+            font-size: 14px;
+            font-weight: 800;
+            color: rgba(15, 23, 42, 0.90);
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
 
-    .canvas {
-      flex: 1;
-      position: relative;
-      overflow: hidden;
-    }
+        .node-meta .desc {
+            font-size: 12px;
+            color: rgba(15, 23, 42, 0.60);
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
 
-    #graph {
-      position: absolute;
-      inset: 0;
-    }
+        /* 右侧主区：画布 + 步骤列表 */
+        .main {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            min-height: 0;
+        }
 
-    .steps {
-      width: 360px;
-      background: rgba(255,255,255,0.96);
-      border-left: 1px solid var(--border);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(10px);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
+        .canvas {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            min-height: 0;
+        }
 
-    .steps-header {
-      padding: 12px 12px 10px;
-      border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-    }
+        #graph {
+            position: absolute;
+            inset: 0;
+        }
 
-    .steps-header .title {
-      font-size: 13px;
-      font-weight: 900;
-      color: rgba(15, 23, 42, 0.85);
-    }
+        .steps {
+            width: 360px;
+            background: rgba(255, 255, 255, 0.96);
+            border-left: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
 
-    .btn {
-      font-size: 12px;
-      padding: 7px 10px;
-      border-radius: 10px;
-      border: 1px solid rgba(15, 23, 42, 0.12);
-      background: #fff;
-      cursor: pointer;
-      user-select: none;
-      color: rgba(15, 23, 42, 0.78);
-    }
+        .steps-header {
+            padding: 12px 12px 10px;
+            border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
 
-    .btn.primary {
-      border-color: rgba(95,149,255,0.45);
-      color: rgba(30,64,175,0.92);
-      background: #F0F5FF;
-    }
+        .steps-header .title {
+            font-size: 13px;
+            font-weight: 900;
+            color: rgba(15, 23, 42, 0.85);
+        }
 
-    .btn.danger {
-      border-color: rgba(255,120,117,0.45);
-      color: rgba(190,18,60,0.88);
-      background: #FFF1F0;
-    }
+        .btn {
+            font-size: 12px;
+            padding: 7px 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(15, 23, 42, 0.12);
+            background: #fff;
+            cursor: pointer;
+            user-select: none;
+            color: rgba(15, 23, 42, 0.78);
+        }
 
-    .btn:active { transform: translateY(1px); }
+        .btn.primary {
+            border-color: rgba(95, 149, 255, 0.45);
+            color: rgba(30, 64, 175, 0.92);
+            background: #F0F5FF;
+        }
 
-    .steps-list {
-      flex: 1;
-      overflow: auto;
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
+        .btn.danger {
+            border-color: rgba(255, 120, 117, 0.45);
+            color: rgba(190, 18, 60, 0.88);
+            background: #FFF1F0;
+        }
 
-    .steps-list::-webkit-scrollbar { width: 10px; }
-    .steps-list::-webkit-scrollbar-thumb {
-      background: rgba(15,23,42,.12);
-      border-radius: 999px;
-      border: 3px solid rgba(255,255,255,0.8);
-    }
-    .steps-list::-webkit-scrollbar-track { background: transparent; }
+        .btn:active {
+            transform: translateY(1px);
+        }
 
-    .step-item {
-      border: 1px solid rgba(95,149,255,0.22);
-      border-radius: 12px;
-      background: #fff;
-      padding: 10px 10px;
-      box-shadow: 0 8px 16px rgba(2,6,23,0.05);
-      cursor: pointer;
-    }
+        .steps-list {
+            flex: 1;
+            overflow: auto;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
 
-    .step-item.selected {
-      border-color: rgba(95,149,255,0.65);
-      box-shadow: 0 10px 22px rgba(2,6,23,0.08);
-    }
+        .steps-list::-webkit-scrollbar {
+            width: 10px;
+        }
 
-    .step-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
+        .steps-list::-webkit-scrollbar-thumb {
+            background: rgba(15, 23, 42, .12);
+            border-radius: 999px;
+            border: 3px solid rgba(255, 255, 255, 0.8);
+        }
 
-    .badge {
-      width: 24px;
-      height: 24px;
-      border-radius: 8px;
-      display: grid;
-      place-items: center;
-      font-size: 12px;
-      font-weight: 900;
-      background: #F0F5FF;
-      color: #1D39C4;
-      border: 1px solid rgba(95,149,255,0.20);
-      flex: 0 0 auto;
-    }
+        .steps-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
 
-    .step-main {
-      min-width: 0;
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
+        .step-item {
+            border: 1px solid rgba(95, 149, 255, 0.22);
+            border-radius: 12px;
+            background: #fff;
+            padding: 10px 10px;
+            box-shadow: 0 8px 16px rgba(2, 6, 23, 0.05);
+            cursor: pointer;
+        }
 
-    .step-main .name {
-      font-size: 13px;
-      font-weight: 900;
-      color: rgba(15,23,42,0.90);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+        .step-item.selected {
+            border-color: rgba(95, 149, 255, 0.65);
+            box-shadow: 0 10px 22px rgba(2, 6, 23, 0.08);
+        }
 
-    .step-main .sub {
-      font-size: 12px;
-      color: rgba(15,23,42,0.60);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+        .step-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
 
-    .step-actions {
-      display: flex;
-      gap: 8px;
-      flex: 0 0 auto;
-    }
+        .badge {
+            width: 24px;
+            height: 24px;
+            border-radius: 8px;
+            display: grid;
+            place-items: center;
+            font-size: 12px;
+            font-weight: 900;
+            background: #F0F5FF;
+            color: #1D39C4;
+            border: 1px solid rgba(95, 149, 255, 0.20);
+            flex: 0 0 auto;
+        }
 
-    .step-edit {
-      padding-top: 10px;
-      margin-top: 10px;
-      border-top: 1px dashed rgba(15,23,42,0.12);
-      display: none;
-      gap: 8px;
-      flex-direction: column;
-    }
+        .step-main {
+            min-width: 0;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
 
-    .step-item.selected .step-edit { display: flex; }
+        .step-main .name {
+            font-size: 13px;
+            font-weight: 900;
+            color: rgba(15, 23, 42, 0.90);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
 
-    .field {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+        .step-main .sub {
+            font-size: 12px;
+            color: rgba(15, 23, 42, 0.60);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
 
-    .field label {
-      font-size: 12px;
-      color: rgba(15,23,42,0.60);
-      width: 72px;
-      flex: 0 0 auto;
-    }
+        .step-actions {
+            display: flex;
+            gap: 8px;
+            flex: 0 0 auto;
+        }
 
-    .field input {
-      flex: 1;
-      min-width: 0;
-      height: 30px;
-      border-radius: 8px;
-      border: 1px solid rgba(95,149,255,0.35);
-      padding: 0 10px;
-      outline: none;
-      background: #FAFAFA;
-      color: rgba(15,23,42,0.85);
-    }
+        .step-edit {
+            padding-top: 10px;
+            margin-top: 10px;
+            border-top: 1px dashed rgba(15, 23, 42, 0.12);
+            display: none;
+            gap: 8px;
+            flex-direction: column;
+        }
 
-    .field input:focus {
-      border-color: rgba(95,149,255,0.75);
-      background: #fff;
-    }
+        .step-item.selected .step-edit {
+            display: flex;
+        }
 
-    .status {
-      position: absolute;
-      left: 14px;
-      bottom: 14px;
-      padding: 7px 10px;
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.92);
-      border: 1px solid rgba(15, 23, 42, 0.10);
-      color: rgba(15, 23, 42, 0.70);
-      font-size: 12px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(10px);
-      max-width: calc(100% - 28px);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      pointer-events: none;
-      z-index: 10;
-    }
+        .field {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
 
-    .top-actions {
-      position: absolute;
-      top: 12px;
-      right: 12px;
-      display: flex;
-      gap: 10px;
-      z-index: 10;
-    }
+        .field label {
+            font-size: 12px;
+            color: rgba(15, 23, 42, 0.60);
+            width: 72px;
+            flex: 0 0 auto;
+        }
 
-    .pill {
-      font-size: 12px;
-      color: rgba(15, 23, 42, 0.72);
-      background: rgba(255, 255, 255, 0.92);
-      border: 1px solid rgba(15, 23, 42, 0.12);
-      border-radius: 999px;
-      padding: 6px 12px;
-      user-select: none;
-      cursor: pointer;
-      box-shadow: 0 8px 18px rgba(2, 6, 23, 0.08);
-      backdrop-filter: blur(10px);
-    }
+        .field input {
+            flex: 1;
+            min-width: 0;
+            height: 30px;
+            border-radius: 8px;
+            border: 1px solid rgba(95, 149, 255, 0.35);
+            padding: 0 10px;
+            outline: none;
+            background: #FAFAFA;
+            color: rgba(15, 23, 42, 0.85);
+        }
 
-    .pill:active { transform: translateY(1px); }
+        .field input:focus {
+            border-color: rgba(95, 149, 255, 0.75);
+            background: #fff;
+        }
 
-    .fallback {
-      padding: 16px;
-      color: var(--text);
-      font-size: 14px;
-    }
+        .status {
+            position: absolute;
+            left: 14px;
+            bottom: 14px;
+            padding: 7px 10px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(15, 23, 42, 0.10);
+            color: rgba(15, 23, 42, 0.70);
+            font-size: 12px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(10px);
+            max-width: calc(100% - 28px);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            pointer-events: none;
+            z-index: 10;
+        }
 
-    /* 自定义拖拽：避免 JavaFX WebView HTML5 DnD 不可靠 */
-    .drag-ghost {
-      position: fixed;
-      left: 0;
-      top: 0;
-      transform: translate(-9999px, -9999px);
-      z-index: 99999;
-      pointer-events: none;
-      width: 260px;
-      border-radius: 12px;
-      border: 1px solid rgba(95,149,255,0.35);
-      background: rgba(255,255,255,0.95);
-      box-shadow: 0 16px 28px rgba(2,6,23,0.14);
-      padding: 10px 12px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      opacity: 0;
-    }
+        .top-actions {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
 
-    .drag-ghost.show { opacity: 1; }
+        .pill {
+            font-size: 12px;
+            color: rgba(15, 23, 42, 0.72);
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(15, 23, 42, 0.12);
+            border-radius: 999px;
+            padding: 6px 12px;
+            user-select: none;
+            cursor: pointer;
+            box-shadow: 0 8px 18px rgba(2, 6, 23, 0.08);
+            backdrop-filter: blur(10px);
+        }
 
-    .drag-ghost .g-icon {
-      width: 32px;
-      height: 32px;
-      border-radius: 10px;
-      display: grid;
-      place-items: center;
-      font-weight: 900;
-      font-size: 12px;
-      background: #F0F5FF;
-      color: #1D39C4;
-      border: 1px solid rgba(95,149,255,0.20);
-    }
+        .pill:active {
+            transform: translateY(1px);
+        }
 
-    .drag-ghost .g-meta {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
-    }
+        .fallback {
+            padding: 16px;
+            color: var(--text);
+            font-size: 14px;
+        }
 
-    .drag-ghost .g-meta .g-name {
-      font-size: 13px;
-      font-weight: 900;
-      color: rgba(15,23,42,0.88);
-    }
+        /* 自定义拖拽：避免 JavaFX WebView HTML5 DnD 不可靠 */
+        .drag-ghost {
+            position: fixed;
+            left: 0;
+            top: 0;
+            transform: translate(-9999px, -9999px);
+            z-index: 99999;
+            pointer-events: none;
+            width: 260px;
+            border-radius: 12px;
+            border: 1px solid rgba(95, 149, 255, 0.35);
+            background: rgba(255, 255, 255, 0.95);
+            box-shadow: 0 16px 28px rgba(2, 6, 23, 0.14);
+            padding: 10px 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            opacity: 0;
+        }
 
-    .drag-ghost .g-meta .g-desc {
-      font-size: 12px;
-      color: rgba(15,23,42,0.55);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 200px;
-    }
-  </style>
+        .drag-ghost.show {
+            opacity: 1;
+        }
+
+        .drag-ghost .g-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            display: grid;
+            place-items: center;
+            font-weight: 900;
+            font-size: 12px;
+            background: #F0F5FF;
+            color: #1D39C4;
+            border: 1px solid rgba(95, 149, 255, 0.20);
+        }
+
+        .drag-ghost .g-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .drag-ghost .g-meta .g-name {
+            font-size: 13px;
+            font-weight: 900;
+            color: rgba(15, 23, 42, 0.88);
+        }
+
+        .drag-ghost .g-meta .g-desc {
+            font-size: 12px;
+            color: rgba(15, 23, 42, 0.55);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+        }
+    </style>
 </head>
 
 <body>
 <div class="layout">
-  <aside class="sidebar">
-    <div class="sidebar-title">网页自动化</div>
+    <aside class="sidebar">
+        <div class="sidebar-title">网页自动化</div>
 
-    <div class="group" data-group="webauto">
-      <div class="group-header">
-        <div>拖拽添加步骤</div>
-      </div>
-      <div class="group-items">
-        <div class="node-card" data-node-type="nav">
-          <div class="node-icon">URL</div>
-          <div class="node-meta">
-            <div class="name">导航</div>
-            <div class="desc">打开目标页面。</div>
-          </div>
+        <div class="group" data-group="webauto">
+            <div class="group-header">
+                <div>拖拽添加步骤</div>
+            </div>
+            <div class="group-items">
+                <div class="node-card" data-node-type="nav">
+                    <div class="node-icon">URL</div>
+                    <div class="node-meta">
+                        <div class="name">导航</div>
+                        <div class="desc">打开目标页面。</div>
+                    </div>
+                </div>
+                <div class="node-card" data-node-type="click">
+                    <div class="node-icon">CLK</div>
+                    <div class="node-meta">
+                        <div class="name">点击</div>
+                        <div class="desc">点击指定元素。</div>
+                    </div>
+                </div>
+                <div class="node-card" data-node-type="fill">
+                    <div class="node-icon">IN</div>
+                    <div class="node-meta">
+                        <div class="name">填充</div>
+                        <div class="desc">向表单输入文本。</div>
+                    </div>
+                </div>
+                <div class="node-card" data-node-type="wait">
+                    <div class="node-icon">⏳</div>
+                    <div class="node-meta">
+                        <div class="name">等待</div>
+                        <div class="desc">等待元素可见/页面稳定。</div>
+                    </div>
+                </div>
+                <div class="node-card" data-node-type="shot">
+                    <div class="node-icon">PIC</div>
+                    <div class="node-meta">
+                        <div class="name">截图</div>
+                        <div class="desc">保存截图作为证据。</div>
+                    </div>
+                </div>
+                <div class="node-card" data-node-type="script">
+                    <div class="node-icon">JS</div>
+                    <div class="node-meta">
+                        <div class="name">执行脚本</div>
+                        <div class="desc">运行自定义脚本。</div>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div class="node-card" data-node-type="click">
-          <div class="node-icon">CLK</div>
-          <div class="node-meta">
-            <div class="name">点击</div>
-            <div class="desc">点击指定元素。</div>
-          </div>
-        </div>
-        <div class="node-card" data-node-type="fill">
-          <div class="node-icon">IN</div>
-          <div class="node-meta">
-            <div class="name">填充</div>
-            <div class="desc">向表单输入文本。</div>
-          </div>
-        </div>
-        <div class="node-card" data-node-type="wait">
-          <div class="node-icon">⏳</div>
-          <div class="node-meta">
-            <div class="name">等待</div>
-            <div class="desc">等待元素可见/页面稳定。</div>
-          </div>
-        </div>
-        <div class="node-card" data-node-type="shot">
-          <div class="node-icon">PIC</div>
-          <div class="node-meta">
-            <div class="name">截图</div>
-            <div class="desc">保存截图作为证据。</div>
-          </div>
-        </div>
-        <div class="node-card" data-node-type="script">
-          <div class="node-icon">JS</div>
-          <div class="node-meta">
-            <div class="name">执行脚本</div>
-            <div class="desc">运行自定义脚本。</div>
-          </div>
-        </div>
-      </div>
-    </div>
 
-    <div style="padding: 6px 10px; color: rgba(15,23,42,.55); font-size: 12px; line-height: 1.45;">
-      提示：JavaFX WebView 下原生 HTML5 拖拽不稳定，本页已改为“自定义拖拽”。将左侧卡片按住拖到画布松开即可。
-    </div>
-  </aside>
-
-  <main class="main">
-    <div class="canvas">
-      <div class="top-actions">
-        <div class="pill" onclick="window.__fit && window.__fit()">适配画布</div>
-        <div class="pill" onclick="window.__exportSteps && window.__exportSteps()">导出步骤 JSON</div>
-      </div>
-      <div id="graph"></div>
-      <div class="status" id="status">就绪</div>
-    </div>
-
-    <section class="steps">
-      <div class="steps-header">
-        <div class="title">任务步骤列表（与画布同步）</div>
-        <div style="display:flex; gap:8px;">
-          <button class="btn primary" id="btn-add">添加步骤</button>
-          <button class="btn danger" id="btn-del">删除选中</button>
+        <div style="padding: 6px 10px; color: rgba(15,23,42,.55); font-size: 12px; line-height: 1.45;">
+            提示：JavaFX WebView 下原生 HTML5 拖拽不稳定，本页已改为"自定义拖拽"。将左侧卡片按住拖到画布松开即可。
         </div>
-      </div>
-      <div class="steps-list" id="steps"></div>
-    </section>
-  </main>
+    </aside>
+
+    <main class="main">
+        <div class="canvas">
+            <div class="top-actions">
+                <div class="pill" onclick="window.__fit && window.__fit()">适配画布</div>
+                <div class="pill" onclick="window.__exportSteps && window.__exportSteps()">导出步骤 JSON</div>
+            </div>
+            <div id="graph"></div>
+            <div class="status" id="status">就绪</div>
+        </div>
+
+        <section class="steps">
+            <div class="steps-header">
+                <div class="title">任务步骤列表（与画布同步）</div>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn primary" id="btn-add">添加步骤</button>
+                    <button class="btn danger" id="btn-del">删除选中</button>
+                </div>
+            </div>
+            <div class="steps-list" id="steps"></div>
+        </section>
+    </main>
 </div>
 
 <div class="drag-ghost" id="ghost">
-  <div class="g-icon" id="ghostIcon">+</div>
-  <div class="g-meta">
-    <div class="g-name" id="ghostName">添加</div>
-    <div class="g-desc" id="ghostDesc">拖到画布松开</div>
-  </div>
+    <div class="g-icon" id="ghostIcon">+</div>
+    <div class="g-meta">
+        <div class="g-name" id="ghostName">添加</div>
+        <div class="g-desc" id="ghostDesc">拖到画布松开</div>
+    </div>
 </div>
 
 <script>
-  (function() {
-    const statusEl = document.getElementById('status')
-    const graphEl = document.getElementById('graph')
-    const stepsEl = document.getElementById('steps')
-    const btnAdd = document.getElementById('btn-add')
-    const btnDel = document.getElementById('btn-del')
+    (function () {
+        const statusEl = document.getElementById('status')
+        const graphEl = document.getElementById('graph')
+        const stepsEl = document.getElementById('steps')
+        const btnAdd = document.getElementById('btn-add')
+        const btnDel = document.getElementById('btn-del')
 
-    const ghostEl = document.getElementById('ghost')
-    const ghostIcon = document.getElementById('ghostIcon')
-    const ghostName = document.getElementById('ghostName')
-    const ghostDesc = document.getElementById('ghostDesc')
+        const ghostEl = document.getElementById('ghost')
+        const ghostIcon = document.getElementById('ghostIcon')
+        const ghostName = document.getElementById('ghostName')
+        const ghostDesc = document.getElementById('ghostDesc')
 
-    const setStatus = (msg) => { statusEl.textContent = msg }
+        const setStatus = (msg) => {
+            statusEl.textContent = msg
+        }
 
-    const X6_SCRIPT_CDNS = [
-      './vendor/x6/x6.min.js',
-      'https://unpkg.com/@antv/x6@2.18.1/dist/x6.min.js',
-      'https://cdn.jsdelivr.net/npm/@antv/x6@2.18.1/dist/x6.min.js',
-      'https://registry.npmmirror.com/@antv/x6/2.18.1/files/dist/x6.min.js',
-    ]
+        const X6_SCRIPT_CDNS = [
+            './vendor/x6/x6.min.js'
+        ]
 
-    function showFallback(reason, tried) {
-      const list = (tried || []).map((u) => `<li style="margin: 6px 0; word-break: break-all;">${u}</li>`).join('')
-      graphEl.innerHTML = `
+        function showFallback(reason, tried) {
+            const list = (tried || []).map((u) => `<li style="margin: 6px 0; word-break: break-all;">${u}</li>`).join('')
+            graphEl.innerHTML = `
         <div class="fallback">
           <div style="font-weight:800; margin-bottom:8px;">X6 资源加载失败</div>
           <div style="opacity:.85; margin-bottom:10px;">原因：${reason || '未知'}</div>
@@ -576,377 +601,389 @@
           <ul style="margin: 0; padding-left: 18px; opacity:.9;">${list}</ul>
         </div>
       `
-    }
-
-    function loadScript(url) {
-      return new Promise((resolve, reject) => {
-        const s = document.createElement('script')
-        s.src = url
-        s.async = true
-        s.onload = () => resolve(url)
-        s.onerror = () => reject(new Error('load failed: ' + url))
-        document.head.appendChild(s)
-      })
-    }
-
-    const COLOR_PORT_GRAY = '#C2C8D5'
-    const COLOR_PORT_BLUE = '#5F95FF'
-
-    let graph = null
-    let selectedId = null
-    let __syncing = false
-
-    function typeMeta(type) {
-      const border = 'rgba(95,149,255,0.75)'
-      const metas = {
-        nav: { icon: 'URL', iconBg: '#F0F5FF', iconFg: '#1D39C4', border },
-        click: { icon: 'CLK', iconBg: '#F0F5FF', iconFg: '#1D39C4', border },
-        fill: { icon: 'IN', iconBg: '#F0F5FF', iconFg: '#1D39C4', border },
-        wait: { icon: '⏳', iconBg: '#F0F5FF', iconFg: '#1D39C4', border },
-        shot: { icon: 'PIC', iconBg: '#F0F5FF', iconFg: '#1D39C4', border },
-        script: { icon: 'JS', iconBg: '#F0F5FF', iconFg: '#1D39C4', border },
-      }
-      return metas[type] || metas.click
-    }
-
-    function registerShapes(Graph) {
-      Graph.registerEdge(
-        'kk-edge',
-        {
-          inherit: 'edge',
-          attrs: {
-            line: {
-              stroke: COLOR_PORT_BLUE,
-              strokeWidth: 2,
-              targetMarker: 'block',
-            },
-          },
-        },
-        true,
-      )
-
-      const basePortAttrs = {
-        r: 4,
-        magnet: true,
-        stroke: COLOR_PORT_GRAY,
-        strokeWidth: 1,
-        fill: COLOR_PORT_GRAY,
-        style: { visibility: 'hidden' },
-      }
-      const createPortGroup = (position) => ({
-        position,
-        attrs: { circle: { ...basePortAttrs } },
-      })
-
-      Graph.registerNode(
-        'kk-card',
-        {
-          inherit: 'rect',
-          width: 260,
-          height: 96,
-          attrs: {
-            body: {
-              fill: '#ffffff',
-              stroke: '#5F95FF',
-              strokeWidth: 1.25,
-              rx: 12,
-              ry: 12,
-            },
-          },
-          markup: [
-            { tagName: 'rect', selector: 'body' },
-            { tagName: 'rect', selector: 'iconBg' },
-            { tagName: 'text', selector: 'iconText' },
-            { tagName: 'text', selector: 'title' },
-            { tagName: 'text', selector: 'subtitle' },
-            { tagName: 'text', selector: 'close' },
-            { tagName: 'text', selector: 'fieldLabel' },
-            { tagName: 'rect', selector: 'fieldBg' },
-            { tagName: 'text', selector: 'fieldValue' },
-          ],
-          ports: {
-            groups: {
-              top: createPortGroup('top'),
-              right: createPortGroup('right'),
-              bottom: createPortGroup('bottom'),
-              left: createPortGroup('left'),
-            },
-          },
-        },
-        true,
-      )
-    }
-
-    function applyCardAttrs(node, meta, data) {
-      const width = node.size().width
-      const showClose = !(data && data.closable === false)
-
-      const title = data && data.title ? String(data.title) : ''
-      const subtitle = data && data.subtitle ? String(data.subtitle) : ''
-      const fieldLabel = data && data.fieldLabel ? String(data.fieldLabel) : ''
-      const fieldValue = data && data.fieldValue != null ? String(data.fieldValue) : ''
-      const showField = !!fieldLabel
-
-      node.attr({
-        body: {
-          stroke: meta.border,
-          rx: 12,
-          ry: 12,
-        },
-
-        iconBg: {
-          x: 12,
-          y: 12,
-          width: 32,
-          height: 32,
-          rx: 8,
-          ry: 8,
-          fill: meta.iconBg,
-          stroke: 'rgba(15,23,42,.06)',
-          strokeWidth: 1,
-        },
-        iconText: {
-          x: 28,
-          y: 28,
-          text: meta.icon,
-          textAnchor: 'middle',
-          textVerticalAnchor: 'middle',
-          fontSize: 12,
-          fontWeight: 600,
-          fill: meta.iconFg,
-        },
-
-        title: {
-          x: 56,
-          y: 26,
-          text: title,
-          textAnchor: 'start',
-          textVerticalAnchor: 'middle',
-          fontSize: 16,
-          fontWeight: 700,
-          fill: '#141414',
-        },
-        subtitle: {
-          x: 56,
-          y: 46,
-          text: subtitle,
-          textAnchor: 'start',
-          textVerticalAnchor: 'middle',
-          fontSize: 12,
-          fill: 'rgba(0,0,0,0.65)',
-        },
-
-        close: {
-          x: width - 16,
-          y: 26,
-          text: '×',
-          textAnchor: 'middle',
-          textVerticalAnchor: 'middle',
-          fontSize: 18,
-          fontWeight: 700,
-          fill: 'rgba(0,0,0,0.35)',
-          cursor: showClose ? 'pointer' : 'default',
-          display: showClose ? 'block' : 'none',
-          'data-kk': 'close',
-        },
-
-        fieldLabel: {
-          x: 12,
-          y: 74,
-          text: showField ? fieldLabel : '',
-          textAnchor: 'start',
-          textVerticalAnchor: 'middle',
-          fontSize: 12,
-          fill: '#8c8c8c',
-          display: showField ? 'block' : 'none',
-        },
-        fieldBg: {
-          x: 72,
-          y: 60,
-          width: width - 84,
-          height: 28,
-          rx: 6,
-          ry: 6,
-          fill: '#FAFAFA',
-          stroke: '#5F95FF',
-          strokeWidth: 1,
-          display: showField ? 'block' : 'none',
-          'data-kk': 'field',
-        },
-        fieldValue: {
-          x: 80,
-          y: 74,
-          text: showField ? (fieldValue || '输入') : '',
-          textAnchor: 'start',
-          textVerticalAnchor: 'middle',
-          fontSize: 12,
-          fill: fieldValue ? '#141414' : 'rgba(0,0,0,0.35)',
-          display: showField ? 'block' : 'none',
-          'data-kk': 'field',
-        },
-      })
-
-      node.setData({ ...(node.getData() || {}), __kkMeta: meta }, { silent: true })
-    }
-
-    function presetForType(t) {
-      const presets = {
-        nav: { type: 'nav', title: '导航', subtitle: '打开目标页面。', fieldLabel: 'URL', fieldValue: '' },
-        click: { type: 'click', title: '点击', subtitle: '点击指定元素。', fieldLabel: '选择器', fieldValue: '' },
-        fill: { type: 'fill', title: '填充', subtitle: '向表单输入文本。', fieldLabel: '输入', fieldValue: '' },
-        wait: { type: 'wait', title: '等待', subtitle: '等待元素可见/页面稳定。', fieldLabel: '超时(ms)', fieldValue: '5000' },
-        shot: { type: 'shot', title: '截图', subtitle: '保存截图作为证据。', fieldLabel: '路径', fieldValue: '' },
-        script: { type: 'script', title: '执行脚本', subtitle: '运行自定义脚本。', fieldLabel: '脚本', fieldValue: '' },
-      }
-      return presets[t] || presets.click
-    }
-
-    function nodeDataFromPreset(p) {
-      const step = {
-        id: null,
-        type: p.type,
-        action: p.title,
-        label: p.subtitle,
-        selector: p.type === 'click' ? '' : null,
-        value: p.fieldValue,
-      }
-      return {
-        type: p.type,
-        title: p.title,
-        subtitle: p.subtitle,
-        fieldLabel: p.fieldLabel,
-        fieldValue: p.fieldValue,
-        step,
-        closable: true,
-      }
-    }
-
-    function addNodeAt(type, x, y) {
-      const preset = presetForType(type)
-      const id = `step-${Date.now()}-${Math.floor(Math.random() * 1000)}`
-
-      const allPorts = [
-        { id: 'top', group: 'top' },
-        { id: 'right', group: 'right' },
-        { id: 'bottom', group: 'bottom' },
-        { id: 'left', group: 'left' },
-      ]
-
-      const data = nodeDataFromPreset(preset)
-      data.step.id = id
-
-      const node = graph.addNode({
-        id,
-        x,
-        y,
-        width: 260,
-        height: 96,
-        shape: 'kk-card',
-        data,
-        ports: { items: allPorts },
-      })
-
-      applyCardAttrs(node, typeMeta(preset.type), data)
-      return node
-    }
-
-    function pickPort(cellId, candidates) {
-      const cell = graph.getCellById(cellId)
-      if (!cell || !cell.isNode || !cell.isNode()) return null
-      const ps = cell.getPorts ? cell.getPorts() : []
-      const ids = ps.map((p) => p && p.id).filter(Boolean)
-      for (const c of candidates) if (ids.includes(c)) return c
-      return ids.length ? ids[0] : null
-    }
-
-    function connect(source, target) {
-      const sourcePort = pickPort(source, ['bottom', 'right', 'top', 'left'])
-      const targetPort = pickPort(target, ['top', 'left', 'bottom', 'right'])
-      if (!sourcePort || !targetPort) return
-
-      graph.addEdge({
-        shape: 'kk-edge',
-        source: { cell: source, port: sourcePort },
-        target: { cell: target, port: targetPort },
-      })
-    }
-
-    function isPortConnected(node, portId) {
-      const edges = graph.getConnectedEdges(node) || []
-      return edges.some(
-        (e) =>
-          (e.getSourceCellId() === node.id && e.getSourcePortId() === portId) ||
-          (e.getTargetCellId() === node.id && e.getTargetPortId() === portId),
-      )
-    }
-
-    function setPortVisible(node, portId, visible) {
-      node.setPortProp(
-        portId,
-        'attrs/circle/style/visibility',
-        visible ? 'visible' : 'hidden',
-      )
-    }
-
-    function setPortColor(node, portId, color) {
-      node.setPortProp(portId, 'attrs/circle/fill', color)
-      node.setPortProp(portId, 'attrs/circle/stroke', color)
-    }
-
-    function showNodePorts(node, show) {
-      const ps = node.getPorts ? node.getPorts() : []
-      for (let i = 0; i < ps.length; i += 1) {
-        const id = ps[i].id
-        if (!id) continue
-        if (show) {
-          setPortVisible(node, id, true)
-        } else {
-          const connected = isPortConnected(node, id)
-          setPortVisible(node, id, connected)
-          setPortColor(node, id, connected ? COLOR_PORT_BLUE : COLOR_PORT_GRAY)
         }
-      }
-    }
 
-    function getOrderedNodes() {
-      const nodes = graph.getNodes ? graph.getNodes() : []
-      if (!nodes.length) return []
-      return nodes
-        .slice()
-        .sort((a, b) => {
-          const pa = a.position ? a.position() : { x: 0, y: 0 }
-          const pb = b.position ? b.position() : { x: 0, y: 0 }
-          if (pa.y !== pb.y) return pa.y - pb.y
-          return pa.x - pb.x
-        })
-    }
-
-    function buildStepsFromGraph() {
-      const nodes = getOrderedNodes()
-      return nodes.map((n, idx) => {
-        const d = n.getData ? (n.getData() || {}) : {}
-        const t = d.type || 'click'
-        const p = presetForType(t)
-
-        const step = {
-          id: n.id,
-          type: t,
-          action: d.title || p.title,
-          label: d.subtitle || p.subtitle,
-          fieldLabel: d.fieldLabel || p.fieldLabel,
-          value: d.fieldValue != null ? String(d.fieldValue) : '',
+        function loadScript(url) {
+            return new Promise((resolve, reject) => {
+                const s = document.createElement('script')
+                s.src = url
+                s.async = true
+                s.onload = () => resolve(url)
+                s.onerror = () => reject(new Error('load failed: ' + url))
+                document.head.appendChild(s)
+            })
         }
-        step.__index = idx + 1
-        return step
-      })
-    }
 
-    function renderStepsList(steps) {
-      const html = steps.map((s) => {
-        const selected = s.id === selectedId
-        const safeVal = (s.value || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        const safeLabel = (s.label || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        return `
+        const COLOR_PORT_GRAY = '#C2C8D5'
+        const COLOR_PORT_BLUE = '#5F95FF'
+
+        let graph = null
+        let selectedId = null
+        let __syncing = false
+
+        function typeMeta(type) {
+            const border = 'rgba(95,149,255,0.75)'
+            const metas = {
+                nav: {icon: 'URL', iconBg: '#F0F5FF', iconFg: '#1D39C4', border},
+                click: {icon: 'CLK', iconBg: '#F0F5FF', iconFg: '#1D39C4', border},
+                fill: {icon: 'IN', iconBg: '#F0F5FF', iconFg: '#1D39C4', border},
+                wait: {icon: '⏳', iconBg: '#F0F5FF', iconFg: '#1D39C4', border},
+                shot: {icon: 'PIC', iconBg: '#F0F5FF', iconFg: '#1D39C4', border},
+                script: {icon: 'JS', iconBg: '#F0F5FF', iconFg: '#1D39C4', border},
+            }
+            return metas[type] || metas.click
+        }
+
+        function registerShapes(Graph) {
+            Graph.registerEdge(
+                'kk-edge',
+                {
+                    inherit: 'edge',
+                    attrs: {
+                        line: {
+                            stroke: COLOR_PORT_BLUE,
+                            strokeWidth: 2,
+                            targetMarker: 'block',
+                        },
+                    },
+                },
+                true,
+            )
+
+            const basePortAttrs = {
+                r: 4,
+                magnet: true,
+                stroke: COLOR_PORT_GRAY,
+                strokeWidth: 1,
+                fill: COLOR_PORT_GRAY,
+                style: {visibility: 'hidden'},
+            }
+            const createPortGroup = (position) => ({
+                position,
+                attrs: {circle: {...basePortAttrs}},
+            })
+
+            Graph.registerNode(
+                'kk-card',
+                {
+                    inherit: 'rect',
+                    width: 260,
+                    height: 96,
+                    attrs: {
+                        body: {
+                            fill: '#ffffff',
+                            stroke: '#5F95FF',
+                            strokeWidth: 1.25,
+                            rx: 12,
+                            ry: 12,
+                        },
+                    },
+                    markup: [
+                        {tagName: 'rect', selector: 'body'},
+                        {tagName: 'rect', selector: 'iconBg'},
+                        {tagName: 'text', selector: 'iconText'},
+                        {tagName: 'text', selector: 'title'},
+                        {tagName: 'text', selector: 'subtitle'},
+                        {tagName: 'text', selector: 'close'},
+                        {tagName: 'text', selector: 'fieldLabel'},
+                        {tagName: 'rect', selector: 'fieldBg'},
+                        {tagName: 'text', selector: 'fieldValue'},
+                    ],
+                    ports: {
+                        groups: {
+                            top: createPortGroup('top'),
+                            right: createPortGroup('right'),
+                            bottom: createPortGroup('bottom'),
+                            left: createPortGroup('left'),
+                        },
+                    },
+                },
+                true,
+            )
+        }
+
+        function applyCardAttrs(node, meta, data) {
+            const width = node.size().width
+            const showClose = !(data && data.closable === false)
+
+            const title = data && data.title ? String(data.title) : ''
+            const subtitle = data && data.subtitle ? String(data.subtitle) : ''
+            const fieldLabel = data && data.fieldLabel ? String(data.fieldLabel) : ''
+            const fieldValue = data && data.fieldValue != null ? String(data.fieldValue) : ''
+            const showField = !!fieldLabel
+
+            node.attr({
+                body: {
+                    stroke: meta.border,
+                    rx: 12,
+                    ry: 12,
+                },
+
+                iconBg: {
+                    x: 12,
+                    y: 12,
+                    width: 32,
+                    height: 32,
+                    rx: 8,
+                    ry: 8,
+                    fill: meta.iconBg,
+                    stroke: 'rgba(15,23,42,.06)',
+                    strokeWidth: 1,
+                },
+                iconText: {
+                    x: 28,
+                    y: 28,
+                    text: meta.icon,
+                    textAnchor: 'middle',
+                    textVerticalAnchor: 'middle',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    fill: meta.iconFg,
+                },
+
+                title: {
+                    x: 56,
+                    y: 26,
+                    text: title,
+                    textAnchor: 'start',
+                    textVerticalAnchor: 'middle',
+                    fontSize: 16,
+                    fontWeight: 700,
+                    fill: '#141414',
+                },
+                subtitle: {
+                    x: 56,
+                    y: 46,
+                    text: subtitle,
+                    textAnchor: 'start',
+                    textVerticalAnchor: 'middle',
+                    fontSize: 12,
+                    fill: 'rgba(0,0,0,0.65)',
+                },
+
+                close: {
+                    x: width - 16,
+                    y: 26,
+                    text: '×',
+                    textAnchor: 'middle',
+                    textVerticalAnchor: 'middle',
+                    fontSize: 18,
+                    fontWeight: 700,
+                    fill: 'rgba(0,0,0,0.35)',
+                    cursor: showClose ? 'pointer' : 'default',
+                    display: showClose ? 'block' : 'none',
+                    'data-kk': 'close',
+                },
+
+                fieldLabel: {
+                    x: 12,
+                    y: 74,
+                    text: showField ? fieldLabel : '',
+                    textAnchor: 'start',
+                    textVerticalAnchor: 'middle',
+                    fontSize: 12,
+                    fill: '#8c8c8c',
+                    display: showField ? 'block' : 'none',
+                },
+                fieldBg: {
+                    x: 72,
+                    y: 60,
+                    width: width - 84,
+                    height: 28,
+                    rx: 6,
+                    ry: 6,
+                    fill: '#FAFAFA',
+                    stroke: '#5F95FF',
+                    strokeWidth: 1,
+                    display: showField ? 'block' : 'none',
+                    'data-kk': 'field',
+                },
+                fieldValue: {
+                    x: 80,
+                    y: 74,
+                    text: showField ? (fieldValue || '输入') : '',
+                    textAnchor: 'start',
+                    textVerticalAnchor: 'middle',
+                    fontSize: 12,
+                    fill: fieldValue ? '#141414' : 'rgba(0,0,0,0.35)',
+                    display: showField ? 'block' : 'none',
+                    'data-kk': 'field',
+                },
+            })
+
+            node.setData({...(node.getData() || {}), __kkMeta: meta}, {silent: true})
+        }
+
+        function presetForType(t) {
+            const presets = {
+                nav: {type: 'nav', title: '导航', subtitle: '打开目标页面。', fieldLabel: 'URL', fieldValue: ''},
+                click: {type: 'click', title: '点击', subtitle: '点击指定元素。', fieldLabel: '选择器', fieldValue: ''},
+                fill: {type: 'fill', title: '填充', subtitle: '向表单输入文本。', fieldLabel: '输入', fieldValue: ''},
+                wait: {
+                    type: 'wait',
+                    title: '等待',
+                    subtitle: '等待元素可见/页面稳定。',
+                    fieldLabel: '超时(ms)',
+                    fieldValue: '5000'
+                },
+                shot: {type: 'shot', title: '截图', subtitle: '保存截图作为证据。', fieldLabel: '路径', fieldValue: ''},
+                script: {
+                    type: 'script',
+                    title: '执行脚本',
+                    subtitle: '运行自定义脚本。',
+                    fieldLabel: '脚本',
+                    fieldValue: ''
+                },
+            }
+            return presets[t] || presets.click
+        }
+
+        function nodeDataFromPreset(p) {
+            const step = {
+                id: null,
+                type: p.type,
+                action: p.title,
+                label: p.subtitle,
+                selector: p.type === 'click' ? '' : null,
+                value: p.fieldValue,
+            }
+            return {
+                type: p.type,
+                title: p.title,
+                subtitle: p.subtitle,
+                fieldLabel: p.fieldLabel,
+                fieldValue: p.fieldValue,
+                step,
+                closable: true,
+            }
+        }
+
+        function addNodeAt(type, x, y) {
+            const preset = presetForType(type)
+            const id = `step-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+
+            const allPorts = [
+                {id: 'top', group: 'top'},
+                {id: 'right', group: 'right'},
+                {id: 'bottom', group: 'bottom'},
+                {id: 'left', group: 'left'},
+            ]
+
+            const data = nodeDataFromPreset(preset)
+            data.step.id = id
+
+            const node = graph.addNode({
+                id,
+                x,
+                y,
+                width: 260,
+                height: 96,
+                shape: 'kk-card',
+                data,
+                ports: {items: allPorts},
+            })
+
+            applyCardAttrs(node, typeMeta(preset.type), data)
+            return node
+        }
+
+        function pickPort(cellId, candidates) {
+            const cell = graph.getCellById(cellId)
+            if (!cell || !cell.isNode || !cell.isNode()) return null
+            const ps = cell.getPorts ? cell.getPorts() : []
+            const ids = ps.map((p) => p && p.id).filter(Boolean)
+            for (const c of candidates) if (ids.includes(c)) return c
+            return ids.length ? ids[0] : null
+        }
+
+        function connect(source, target) {
+            const sourcePort = pickPort(source, ['bottom', 'right', 'top', 'left'])
+            const targetPort = pickPort(target, ['top', 'left', 'bottom', 'right'])
+            if (!sourcePort || !targetPort) return
+
+            graph.addEdge({
+                shape: 'kk-edge',
+                source: {cell: source, port: sourcePort},
+                target: {cell: target, port: targetPort},
+            })
+        }
+
+        function isPortConnected(node, portId) {
+            const edges = graph.getConnectedEdges(node) || []
+            return edges.some(
+                (e) =>
+                    (e.getSourceCellId() === node.id && e.getSourcePortId() === portId) ||
+                    (e.getTargetCellId() === node.id && e.getTargetPortId() === portId),
+            )
+        }
+
+        function setPortVisible(node, portId, visible) {
+            node.setPortProp(
+                portId,
+                'attrs/circle/style/visibility',
+                visible ? 'visible' : 'hidden',
+            )
+        }
+
+        function setPortColor(node, portId, color) {
+            node.setPortProp(portId, 'attrs/circle/fill', color)
+            node.setPortProp(portId, 'attrs/circle/stroke', color)
+        }
+
+        function showNodePorts(node, show) {
+            const ps = node.getPorts ? node.getPorts() : []
+            for (let i = 0; i < ps.length; i += 1) {
+                const id = ps[i].id
+                if (!id) continue
+                if (show) {
+                    setPortVisible(node, id, true)
+                } else {
+                    const connected = isPortConnected(node, id)
+                    setPortVisible(node, id, connected)
+                    setPortColor(node, id, connected ? COLOR_PORT_BLUE : COLOR_PORT_GRAY)
+                }
+            }
+        }
+
+        function getOrderedNodes() {
+            const nodes = graph.getNodes ? graph.getNodes() : []
+            if (!nodes.length) return []
+            return nodes
+                .slice()
+                .sort((a, b) => {
+                    const pa = a.position ? a.position() : {x: 0, y: 0}
+                    const pb = b.position ? b.position() : {x: 0, y: 0}
+                    if (pa.y !== pb.y) return pa.y - pb.y
+                    return pa.x - pb.x
+                })
+        }
+
+        function buildStepsFromGraph() {
+            const nodes = getOrderedNodes()
+            return nodes.map((n, idx) => {
+                const d = n.getData ? (n.getData() || {}) : {}
+                const t = d.type || 'click'
+                const p = presetForType(t)
+
+                const step = {
+                    id: n.id,
+                    type: t,
+                    action: d.title || p.title,
+                    label: d.subtitle || p.subtitle,
+                    fieldLabel: d.fieldLabel || p.fieldLabel,
+                    value: d.fieldValue != null ? String(d.fieldValue) : '',
+                }
+                step.__index = idx + 1
+                return step
+            })
+        }
+
+        function renderStepsList(steps) {
+            const html = steps.map((s) => {
+                const selected = s.id === selectedId
+                const safeVal = (s.value || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                const safeLabel = (s.label || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                return `
           <div class="step-item ${selected ? 'selected' : ''}" data-step-id="${s.id}">
             <div class="step-row">
               <div class="badge">${s.__index}</div>
@@ -979,480 +1016,558 @@
             </div>
           </div>
         `
-      }).join('')
+            }).join('')
 
-      stepsEl.innerHTML = html || `<div style="padding:12px; color: rgba(15,23,42,0.55); font-size:12px;">暂无步骤：从左侧拖到画布，或点“添加步骤”。</div>`
-    }
-
-    function syncAll(reason) {
-      if (__syncing) return
-      __syncing = true
-      try {
-        const steps = buildStepsFromGraph()
-        renderStepsList(steps)
-
-        // 暴露：给 JavaFX 调用拿当前步骤
-        window.getTaskSteps = function() {
-          return JSON.stringify(steps.map((s) => {
-            const { __index, ...rest } = s
-            return rest
-          }))
+            stepsEl.innerHTML = html || `<div style="padding:12px; color: rgba(15,23,42,0.55); font-size:12px;">暂无步骤：从左侧拖到画布，或点"添加步骤"。</div>`
         }
 
-        // 通知：如果宿主注入了回调
-        try {
-          if (typeof window.onTaskStepsChanged === 'function') {
-            window.onTaskStepsChanged(window.getTaskSteps(), reason || 'sync')
-          }
-        } catch (e) {}
-      } finally {
-        __syncing = false
-      }
-    }
-
-    function focusNode(id) {
-      if (!id || !graph) return
-      const cell = graph.getCellById(id)
-      if (cell && cell.isNode && cell.isNode()) {
-        try { graph.select(cell) } catch (e) {}
-        try {
-          graph.centerCell(cell)
-        } catch (e) {
-          try { graph.centerContent() } catch (e2) {}
-        }
-      }
-    }
-
-    function deleteNode(id) {
-      if (!id || !graph) return
-      const cell = graph.getCellById(id)
-      if (cell) {
-        cell.remove()
-      }
-    }
-
-    function updateNodeFromStepUI(rootEl) {
-      const id = rootEl.getAttribute('data-step-id')
-      if (!id) return
-      const cell = graph.getCellById(id)
-      if (!cell || !cell.isNode || !cell.isNode()) return
-
-      const title = (rootEl.querySelector('input[data-edit="title"]') || {}).value || ''
-      const subtitle = (rootEl.querySelector('input[data-edit="subtitle"]') || {}).value || ''
-      const value = (rootEl.querySelector('input[data-edit="value"]') || {}).value || ''
-
-      const d = cell.getData ? (cell.getData() || {}) : {}
-      d.title = String(title)
-      d.subtitle = String(subtitle)
-      d.fieldValue = String(value)
-      if (!d.fieldLabel) {
-        const p = presetForType(d.type || 'click')
-        d.fieldLabel = p.fieldLabel
-      }
-
-      cell.setData(d)
-      applyCardAttrs(cell, typeMeta(d.type || 'click'), d)
-    }
-
-    function boot() {
-      if (!window.X6 || !window.X6.Graph) {
-        showFallback('脚本已加载但 X6 未初始化（可能被 CSP/代理篡改）', X6_SCRIPT_CDNS)
-        return
-      }
-
-      const { Graph } = window.X6
-      registerShapes(Graph)
-
-      graph = new Graph({
-        container: graphEl,
-        background: { color: '#f4f7ff' },
-        grid: {
-          size: 12,
-          visible: true,
-          type: 'dot',
-          args: { color: 'rgba(15,23,42,0.12)' },
-        },
-        panning: true,
-        mousewheel: {
-          enabled: true,
-          modifiers: ['ctrl', 'meta'],
-          minScale: 0.25,
-          maxScale: 2.5,
-        },
-        selecting: {
-          enabled: true,
-          multiple: false,
-          rubberband: false,
-          showNodeSelectionBox: true,
-        },
-        connecting: {
-          connector: { name: 'smooth' },
-          connectionPoint: 'anchor',
-          allowBlank: false,
-          snap: { radius: 20 },
-          allowEdge: false,
-          allowLoop: false,
-          highlight: true,
-          createEdge() {
-            return graph.createEdge({ shape: 'kk-edge' })
-          },
-          validateConnection({ sourceCell, targetCell, sourcePort, targetPort, targetMagnet }) {
-            if (!targetMagnet) return false
-            if (!sourceCell || !targetCell) return false
-            if (sourceCell.id === targetCell.id) return false
-
-            // 强制：从 bottom 连到 top
-            if (sourcePort !== 'bottom') return false
-            if (targetPort !== 'top') return false
-
-            // 限制：同一个 source bottom 只能连一次（避免列表非线性）
+        function syncAll(reason) {
+            if (__syncing) return
+            __syncing = true
             try {
-              const edges = graph.getConnectedEdges(sourceCell) || []
-              const exists = edges.some((e) => e.getSourceCellId() === sourceCell.id && e.getSourcePortId() === sourcePort)
-              if (exists) return false
-            } catch (e) {}
+                const steps = buildStepsFromGraph()
+                renderStepsList(steps)
 
-            return true
-          },
-        },
-        highlighting: {
-          magnetAdsorbed: {
-            name: 'stroke',
-            args: {
-              attrs: {
-                fill: COLOR_PORT_BLUE,
-                stroke: COLOR_PORT_BLUE,
-              },
-            },
-          },
-        },
-      })
+                // 暴露：给 JavaFX 调用拿当前步骤
+                window.getTaskSteps = function () {
+                    return JSON.stringify(steps.map((s) => {
+                        const {__index, ...rest} = s
+                        return rest
+                    }))
+                }
 
-      graph.on('node:mouseenter', ({ node }) => showNodePorts(node, true))
-      graph.on('node:mouseleave', ({ node }) => showNodePorts(node, false))
-
-      graph.on('edge:mouseenter', ({ edge }) => {
-        edge.addTools({ name: 'button-remove', args: { distance: -40 } })
-      })
-      graph.on('edge:mouseleave', ({ edge }) => {
-        edge.removeTools()
-      })
-
-      graph.on('edge:connected', ({ currentCell, currentPort }) => {
-        if (!currentCell || !currentPort) return
-        try {
-          setPortVisible(currentCell, currentPort, true)
-          setPortColor(currentCell, currentPort, COLOR_PORT_BLUE)
-        } catch (e) {}
-        syncAll('edge:connected')
-      })
-
-      graph.on('edge:removed', ({ edge }) => {
-        try {
-          const sId = edge.getSourceCellId && edge.getSourceCellId()
-          const sPort = edge.getSourcePortId && edge.getSourcePortId()
-          const tId = edge.getTargetCellId && edge.getTargetCellId()
-          const tPort = edge.getTargetPortId && edge.getTargetPortId()
-          const s = sId ? graph.getCellById(sId) : null
-          const t = tId ? graph.getCellById(tId) : null
-          if (s && s.isNode && s.isNode() && sPort) {
-            const still = isPortConnected(s, sPort)
-            if (!still) {
-              setPortVisible(s, sPort, false)
-              setPortColor(s, sPort, COLOR_PORT_GRAY)
+                // 通知：如果宿主注入了回调
+                try {
+                    if (typeof window.onTaskStepsChanged === 'function') {
+                        window.onTaskStepsChanged(window.getTaskSteps(), reason || 'sync')
+                    }
+                } catch (e) {
+                }
+            } finally {
+                __syncing = false
             }
-          }
-          if (t && t.isNode && t.isNode() && tPort) {
-            const still = isPortConnected(t, tPort)
-            if (!still) {
-              setPortVisible(t, tPort, false)
-              setPortColor(t, tPort, COLOR_PORT_GRAY)
+        }
+
+        function focusNode(id) {
+            if (!id || !graph) return
+            const cell = graph.getCellById(id)
+            if (cell && cell.isNode && cell.isNode()) {
+                try {
+                    graph.select(cell)
+                } catch (e) {
+                }
+                try {
+                    graph.centerCell(cell)
+                } catch (e) {
+                    try {
+                        graph.centerContent()
+                    } catch (e2) {
+                    }
+                }
             }
-          }
-        } catch (e) {}
-        syncAll('edge:removed')
-      })
-
-      graph.on('node:click', ({ node, e }) => {
-        const target = e && e.target
-        const role = target && target.getAttribute ? target.getAttribute('data-kk') : ''
-        if (role === 'close') {
-          node.remove()
-          setStatus('已删除步骤')
-          return
-        }
-        if (role === 'field') {
-          // 画布内快捷编辑：同步到右侧列表
-          const d = node.getData() || {}
-          const next = window.prompt('编辑步骤参数', d.fieldValue == null ? '' : String(d.fieldValue))
-          if (next != null) {
-            d.fieldValue = String(next)
-            node.setData(d)
-            applyCardAttrs(node, typeMeta(d.type), d)
-            syncAll('node:edit')
-          }
         }
 
-        selectedId = node.id
-        syncAll('node:select')
-      })
-
-      graph.on('node:removed', () => {
-        if (selectedId) {
-          const cell = graph.getCellById(selectedId)
-          if (!cell) selectedId = null
-        }
-        syncAll('node:removed')
-      })
-
-      graph.on('node:moved', () => syncAll('node:moved'))
-      graph.on('node:added', ({ node }) => {
-        // ports 初始状态：只显示已连接的
-        try { showNodePorts(node, false) } catch (e) {}
-        syncAll('node:added')
-      })
-
-      // 暴露给 JavaFX WebView：设置步骤并渲染
-      window.setTaskSteps = function(steps) {
-        try {
-          const arr = Array.isArray(steps) ? steps : []
-          graph.clearCells()
-
-          const baseX = 120
-          const baseY = 70
-          const gapY = 140
-
-          let prevId = null
-
-          arr.forEach((s, idx) => {
-            const type = String(s.type || '') || inferTypeFromAction(s.action)
-            const preset = presetForType(type)
-
-            const node = addNodeAt(
-              preset.type,
-              baseX,
-              baseY + gapY * idx,
-            )
-
-            const d = node.getData() || {}
-            d.title = s.action != null ? String(s.action) : preset.title
-            d.subtitle = s.label != null ? String(s.label) : preset.subtitle
-            d.fieldLabel = s.fieldLabel != null ? String(s.fieldLabel) : preset.fieldLabel
-            d.fieldValue = s.value != null ? String(s.value) : (preset.fieldValue || '')
-            if (s.id) d.step.id = String(s.id)
-
-            node.setData(d)
-            applyCardAttrs(node, typeMeta(preset.type), d)
-
-            if (prevId) connect(prevId, node.id)
-            prevId = node.id
-          })
-
-          try { graph.centerContent() } catch (e) {}
-          selectedId = null
-          syncAll('setTaskSteps')
-          setStatus(`已渲染：${arr.length} 步`) 
-        } catch (e) {
-          console.error(e)
-          setStatus('渲染失败：' + (e && e.message ? e.message : String(e)))
-        }
-      }
-
-      // 给宿主导出：仅导出步骤（而非 graph JSON）
-      window.__exportSteps = function() {
-        try {
-          const text = window.getTaskSteps ? window.getTaskSteps() : '[]'
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(() => setStatus('已复制步骤 JSON 到剪贴板'))
-          } else {
-            setStatus('当前环境不支持剪贴板：请在控制台查看')
-            console.log(text)
-          }
-        } catch (e) {
-          setStatus('导出失败：' + (e && e.message ? e.message : String(e)))
-        }
-      }
-
-      window.__fit = function() {
-        if (!graph) return
-        graph.centerContent()
-        setStatus('已适配画布')
-      }
-
-      // 默认示例
-      window.setTaskSteps([
-        { type: 'nav', action: '导航', label: '打开页面', fieldLabel: 'URL', value: 'https://www.baidu.com' },
-        { type: 'click', action: '点击', label: '点击登录按钮', fieldLabel: '选择器', value: '#login' },
-      ])
-
-      // 步骤列表交互
-      stepsEl.addEventListener('click', (e) => {
-        const el = e.target
-        const item = el && el.closest ? el.closest('.step-item') : null
-        if (!item) return
-        const id = item.getAttribute('data-step-id')
-        const act = el && el.getAttribute ? el.getAttribute('data-act') : null
-
-        selectedId = id
-
-        if (act === 'delete') {
-          deleteNode(id)
-          setStatus('已删除步骤')
-          return
-        }
-        if (act === 'focus') {
-          focusNode(id)
-          setStatus('已定位步骤')
-          syncAll('list:focus')
-          return
-        }
-        if (act === 'save') {
-          updateNodeFromStepUI(item)
-          setStatus('已保存步骤')
-          syncAll('list:save')
-          return
+        function deleteNode(id) {
+            if (!id || !graph) return
+            const cell = graph.getCellById(id)
+            if (cell) {
+                cell.remove()
+            }
         }
 
-        focusNode(id)
-        syncAll('list:select')
-      })
+        function updateNodeFromStepUI(rootEl) {
+            const id = rootEl.getAttribute('data-step-id')
+            if (!id) return
+            const cell = graph.getCellById(id)
+            if (!cell || !cell.isNode || !cell.isNode()) return
 
-      btnAdd.addEventListener('click', () => {
-        const type = 'click'
-        const nodes = getOrderedNodes()
-        const last = nodes.length ? nodes[nodes.length - 1] : null
+            const title = (rootEl.querySelector('input[data-edit="title"]') || {}).value || ''
+            const subtitle = (rootEl.querySelector('input[data-edit="subtitle"]') || {}).value || ''
+            const value = (rootEl.querySelector('input[data-edit="value"]') || {}).value || ''
 
-        let x = 120
-        let y = 70
-        if (last) {
-          const p = last.position()
-          x = p.x
-          y = p.y + 140
+            const d = cell.getData ? (cell.getData() || {}) : {}
+            d.title = String(title)
+            d.subtitle = String(subtitle)
+            d.fieldValue = String(value)
+            if (!d.fieldLabel) {
+                const p = presetForType(d.type || 'click')
+                d.fieldLabel = p.fieldLabel
+            }
+
+            cell.setData(d)
+            applyCardAttrs(cell, typeMeta(d.type || 'click'), d)
         }
 
-        const n = addNodeAt(type, x, y)
-        if (last) connect(last.id, n.id)
-        selectedId = n.id
-        try { graph.select(n) } catch (e) {}
-        try { graph.centerCell(n) } catch (e) {}
-        syncAll('btn:add')
-        setStatus('已添加步骤')
-      })
+        function boot() {
+            if (!window.X6 || !window.X6.Graph) {
+                showFallback('脚本已加载但 X6 未初始化（可能被 CSP/代理篡改）', X6_SCRIPT_CDNS)
+                return
+            }
 
-      btnDel.addEventListener('click', () => {
-        if (!selectedId) {
-          setStatus('请先在列表/画布选择一个步骤')
-          return
+            const {Graph} = window.X6
+            registerShapes(Graph)
+
+            graph = new Graph({
+                container: graphEl,
+                autoResize: true,
+                background: {color: '#f4f7ff'},
+                grid: {
+                    size: 12,
+                    visible: true,
+                    type: 'dot',
+                    args: {color: 'rgba(15,23,42,0.12)'},
+                },
+                panning: true,
+                mousewheel: {
+                    enabled: true,
+                    modifiers: ['ctrl', 'meta'],
+                    minScale: 0.25,
+                    maxScale: 2.5,
+                },
+                selecting: {
+                    enabled: true,
+                    multiple: false,
+                    rubberband: false,
+                    showNodeSelectionBox: true,
+                },
+                connecting: {
+                    connector: {name: 'smooth'},
+                    connectionPoint: 'anchor',
+                    allowBlank: false,
+                    snap: {radius: 20},
+                    allowEdge: false,
+                    allowLoop: false,
+                    highlight: true,
+                    createEdge() {
+                        return graph.createEdge({shape: 'kk-edge'})
+                    },
+                    validateConnection({sourceCell, targetCell, sourcePort, targetPort, targetMagnet}) {
+                        if (!targetMagnet) return false
+                        if (!sourceCell || !targetCell) return false
+                        if (sourceCell.id === targetCell.id) return false
+
+                        // 强制：从 bottom 连到 top
+                        if (sourcePort !== 'bottom') return false
+                        if (targetPort !== 'top') return false
+
+                        // 限制：同一个 source bottom 只能连一次（避免列表非线性）
+                        try {
+                            const edges = graph.getConnectedEdges(sourceCell) || []
+                            const exists = edges.some((e) => e.getSourceCellId() === sourceCell.id && e.getSourcePortId() === sourcePort)
+                            if (exists) return false
+                        } catch (e) {
+                        }
+
+                        return true
+                    },
+                },
+                highlighting: {
+                    magnetAdsorbed: {
+                        name: 'stroke',
+                        args: {
+                            attrs: {
+                                fill: COLOR_PORT_BLUE,
+                                stroke: COLOR_PORT_BLUE,
+                            },
+                        },
+                    },
+                },
+            })
+
+            graph.on('node:mouseenter', ({node}) => showNodePorts(node, true))
+            graph.on('node:mouseleave', ({node}) => showNodePorts(node, false))
+
+            graph.on('edge:mouseenter', ({edge}) => {
+                edge.addTools({name: 'button-remove', args: {distance: -40}})
+            })
+            graph.on('edge:mouseleave', ({edge}) => {
+                edge.removeTools()
+            })
+
+            graph.on('edge:connected', ({currentCell, currentPort}) => {
+                if (!currentCell || !currentPort) return
+                try {
+                    setPortVisible(currentCell, currentPort, true)
+                    setPortColor(currentCell, currentPort, COLOR_PORT_BLUE)
+                } catch (e) {
+                }
+                syncAll('edge:connected')
+            })
+
+            graph.on('edge:removed', ({edge}) => {
+                try {
+                    const sId = edge.getSourceCellId && edge.getSourceCellId()
+                    const sPort = edge.getSourcePortId && edge.getSourcePortId()
+                    const tId = edge.getTargetCellId && edge.getTargetCellId()
+                    const tPort = edge.getTargetPortId && edge.getTargetPortId()
+                    const s = sId ? graph.getCellById(sId) : null
+                    const t = tId ? graph.getCellById(tId) : null
+                    if (s && s.isNode && s.isNode() && sPort) {
+                        const still = isPortConnected(s, sPort)
+                        if (!still) {
+                            setPortVisible(s, sPort, false)
+                            setPortColor(s, sPort, COLOR_PORT_GRAY)
+                        }
+                    }
+                    if (t && t.isNode && t.isNode() && tPort) {
+                        const still = isPortConnected(t, tPort)
+                        if (!still) {
+                            setPortVisible(t, tPort, false)
+                            setPortColor(t, tPort, COLOR_PORT_GRAY)
+                        }
+                    }
+                } catch (e) {
+                }
+                syncAll('edge:removed')
+            })
+
+            graph.on('node:click', ({node, e}) => {
+                const target = e && e.target
+                const role = target && target.getAttribute ? target.getAttribute('data-kk') : ''
+                if (role === 'close') {
+                    node.remove()
+                    setStatus('已删除步骤')
+                    return
+                }
+                if (role === 'field') {
+                    // 画布内快捷编辑：同步到右侧列表
+                    const d = node.getData() || {}
+                    const next = window.prompt('编辑步骤参数', d.fieldValue == null ? '' : String(d.fieldValue))
+                    if (next != null) {
+                        d.fieldValue = String(next)
+                        node.setData(d)
+                        applyCardAttrs(node, typeMeta(d.type), d)
+                        syncAll('node:edit')
+                    }
+                }
+
+                selectedId = node.id
+                syncAll('node:select')
+            })
+
+            graph.on('node:removed', () => {
+                if (selectedId) {
+                    const cell = graph.getCellById(selectedId)
+                    if (!cell) selectedId = null
+                }
+                syncAll('node:removed')
+            })
+
+            graph.on('node:moved', () => syncAll('node:moved'))
+            graph.on('node:added', ({node}) => {
+                // ports 初始状态：只显示已连接的
+                try {
+                    showNodePorts(node, false)
+                } catch (e) {
+                }
+                syncAll('node:added')
+            })
+
+            // 暴露给 JavaFX WebView：设置步骤并渲染
+            window.setTaskSteps = function (steps) {
+                try {
+                    const arr = Array.isArray(steps) ? steps : []
+                    graph.clearCells()
+
+                    const baseX = 120
+                    const baseY = 70
+                    const gapY = 140
+
+                    let prevId = null
+
+                    arr.forEach((s, idx) => {
+                        const type = String(s.type || '') || inferTypeFromAction(s.action)
+                        const preset = presetForType(type)
+
+                        const node = addNodeAt(
+                            preset.type,
+                            baseX,
+                            baseY + gapY * idx,
+                        )
+
+                        const d = node.getData() || {}
+                        d.title = s.action != null ? String(s.action) : preset.title
+                        d.subtitle = s.label != null ? String(s.label) : preset.subtitle
+                        d.fieldLabel = s.fieldLabel != null ? String(s.fieldLabel) : preset.fieldLabel
+                        d.fieldValue = s.value != null ? String(s.value) : (preset.fieldValue || '')
+                        if (s.id) d.step.id = String(s.id)
+
+                        node.setData(d)
+                        applyCardAttrs(node, typeMeta(preset.type), d)
+
+                        if (prevId) connect(prevId, node.id)
+                        prevId = node.id
+                    })
+
+                    try {
+                        graph.centerContent()
+                    } catch (e) {
+                    }
+                    selectedId = null
+                    syncAll('setTaskSteps')
+                    setStatus(`已渲染：${arr.length} 步`)
+                } catch (e) {
+                    console.error(e)
+                    setStatus('渲染失败：' + (e && e.message ? e.message : String(e)))
+                }
+            }
+
+            // 给宿主导出：仅导出步骤（而非 graph JSON）
+            window.__exportSteps = function () {
+                try {
+                    const text = window.getTaskSteps ? window.getTaskSteps() : '[]'
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(text).then(() => setStatus('已复制步骤 JSON 到剪贴板'))
+                    } else {
+                        setStatus('当前环境不支持剪贴板：请在控制台查看')
+                        console.log(text)
+                    }
+                } catch (e) {
+                    setStatus('导出失败：' + (e && e.message ? e.message : String(e)))
+                }
+            }
+
+            window.__fit = function () {
+                if (!graph) return
+
+                try {
+                    const container = document.getElementById('graph')
+                    if (container) {
+                        const rect = container.getBoundingClientRect()
+
+                        // 强制重新计算尺寸
+                        if (rect.width > 0 && rect.height > 0) {
+                            graph.resize(rect.width, rect.height)
+                        }
+
+                        // 居中内容
+                        graph.centerContent()
+                        setStatus('已适配画布')
+                    }
+                } catch (e) {
+                    console.error('fit error:', e)
+                    setStatus('适配失败')
+                }
+            }
+
+            // 默认示例
+            window.setTaskSteps([
+                {type: 'nav', action: '导航', label: '打开页面', fieldLabel: 'URL', value: 'https://www.baidu.com'},
+                {type: 'click', action: '点击', label: '点击登录按钮', fieldLabel: '选择器', value: '#login'},
+            ])
+
+            // 步骤列表交互
+            stepsEl.addEventListener('click', (e) => {
+                const el = e.target
+                const item = el && el.closest ? el.closest('.step-item') : null
+                if (!item) return
+                const id = item.getAttribute('data-step-id')
+                const act = el && el.getAttribute ? el.getAttribute('data-act') : null
+
+                selectedId = id
+
+                if (act === 'delete') {
+                    deleteNode(id)
+                    setStatus('已删除步骤')
+                    return
+                }
+                if (act === 'focus') {
+                    focusNode(id)
+                    setStatus('已定位步骤')
+                    syncAll('list:focus')
+                    return
+                }
+                if (act === 'save') {
+                    updateNodeFromStepUI(item)
+                    setStatus('已保存步骤')
+                    syncAll('list:save')
+                    return
+                }
+
+                focusNode(id)
+                syncAll('list:select')
+            })
+
+            btnAdd.addEventListener('click', () => {
+                const type = 'click'
+                const nodes = getOrderedNodes()
+                const last = nodes.length ? nodes[nodes.length - 1] : null
+
+                let x = 120
+                let y = 70
+                if (last) {
+                    const p = last.position()
+                    x = p.x
+                    y = p.y + 140
+                }
+
+                const n = addNodeAt(type, x, y)
+                if (last) connect(last.id, n.id)
+                selectedId = n.id
+                try {
+                    graph.select(n)
+                } catch (e) {
+                }
+                try {
+                    graph.centerCell(n)
+                } catch (e) {
+                }
+                syncAll('btn:add')
+                setStatus('已添加步骤')
+            })
+
+            btnDel.addEventListener('click', () => {
+                if (!selectedId) {
+                    setStatus('请先在列表/画布选择一个步骤')
+                    return
+                }
+                deleteNode(selectedId)
+                selectedId = null
+                syncAll('btn:del')
+                setStatus('已删除选中步骤')
+            })
+
+            // 自定义拖拽（替代 HTML5 DnD）：兼容 JavaFX WebView
+            let dragging = null
+
+            function setGhost(x, y, show) {
+                if (!ghostEl) return
+                if (show) ghostEl.classList.add('show')
+                else ghostEl.classList.remove('show')
+                ghostEl.style.transform = `translate(${x + 12}px, ${y + 12}px)`
+            }
+
+            function inGraphArea(clientX, clientY) {
+                const rect = graphEl.getBoundingClientRect()
+                return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+            }
+
+            document.querySelectorAll('.node-card').forEach((card) => {
+                card.addEventListener('mousedown', (ev) => {
+                    const t = card.getAttribute('data-node-type')
+                    if (!t) return
+                    dragging = {type: t}
+
+                    const preset = presetForType(t)
+                    ghostIcon.textContent = typeMeta(t).icon
+                    ghostName.textContent = preset.title
+                    ghostDesc.textContent = preset.subtitle
+
+                    setGhost(ev.clientX, ev.clientY, true)
+                    ev.preventDefault()
+                })
+            })
+
+            document.addEventListener('mousemove', (ev) => {
+                if (!dragging) return
+                setGhost(ev.clientX, ev.clientY, true)
+            })
+
+            document.addEventListener('mouseup', (ev) => {
+                if (!dragging) return
+
+                const type = dragging.type
+                dragging = null
+                setGhost(-9999, -9999, false)
+
+                if (!inGraphArea(ev.clientX, ev.clientY)) {
+                    setStatus('已取消：请拖到画布区域松开')
+                    return
+                }
+
+                const p = graph.clientToLocal(ev.clientX, ev.clientY)
+                const node = addNodeAt(type, Math.max(40, p.x - 130), Math.max(40, p.y - 48))
+
+                // 自动连线：与最后一步连接
+                const ordered = getOrderedNodes().filter((n) => n.id !== node.id)
+                if (ordered.length) {
+                    const last = ordered[ordered.length - 1]
+                    connect(last.id, node.id)
+                }
+
+                selectedId = node.id
+                try {
+                    graph.select(node)
+                } catch (e) {
+                }
+                syncAll('drag:add')
+                setStatus('已添加步骤：' + presetForType(type).title)
+            })
+
+            // 监听窗口大小变化，自动适配画布
+            let resizeTimeout = null
+            window.addEventListener('resize', () => {
+                if (!graph) return
+
+                // 防抖处理
+                if (resizeTimeout) clearTimeout(resizeTimeout)
+
+                resizeTimeout = setTimeout(() => {
+                    try {
+                        // 重新计算画布尺寸
+                        const container = document.getElementById('graph')
+                        if (container) {
+                            const rect = container.getBoundingClientRect()
+                            if (rect.width > 0 && rect.height > 0) {
+                                // 让 X6 重新计算视图
+                                graph.resize(rect.width, rect.height)
+                                // 居中内容
+                                graph.centerContent()
+                                setStatus('已自动适配画布')
+                            }
+                        }
+                    } catch (e) {
+                        console.error('resize error:', e)
+                    }
+                }, 150)
+            })
+
+            // 首次渲染同步
+            syncAll('boot')
+            setStatus('就绪：拖拽添加步骤；右侧列表与画布同步')
+
+            // 页面完全加载后执行一次适配
+            setTimeout(() => {
+                if (window.__fit) {
+                    window.__fit()
+                }
+            }, 50)
         }
-        deleteNode(selectedId)
-        selectedId = null
-        syncAll('btn:del')
-        setStatus('已删除选中步骤')
-      })
 
-      // 自定义拖拽（替代 HTML5 DnD）：兼容 JavaFX WebView
-      let dragging = null
-
-      function setGhost(x, y, show) {
-        if (!ghostEl) return
-        if (show) ghostEl.classList.add('show')
-        else ghostEl.classList.remove('show')
-        ghostEl.style.transform = `translate(${x + 12}px, ${y + 12}px)`
-      }
-
-      function inGraphArea(clientX, clientY) {
-        const rect = graphEl.getBoundingClientRect()
-        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
-      }
-
-      document.querySelectorAll('.node-card').forEach((card) => {
-        card.addEventListener('mousedown', (ev) => {
-          const t = card.getAttribute('data-node-type')
-          if (!t) return
-          dragging = { type: t }
-
-          const preset = presetForType(t)
-          ghostIcon.textContent = typeMeta(t).icon
-          ghostName.textContent = preset.title
-          ghostDesc.textContent = preset.subtitle
-
-          setGhost(ev.clientX, ev.clientY, true)
-          ev.preventDefault()
-        })
-      })
-
-      document.addEventListener('mousemove', (ev) => {
-        if (!dragging) return
-        setGhost(ev.clientX, ev.clientY, true)
-      })
-
-      document.addEventListener('mouseup', (ev) => {
-        if (!dragging) return
-
-        const type = dragging.type
-        dragging = null
-        setGhost(-9999, -9999, false)
-
-        if (!inGraphArea(ev.clientX, ev.clientY)) {
-          setStatus('已取消：请拖到画布区域松开')
-          return
+        function inferTypeFromAction(action) {
+            const a = String(action || '')
+            if (a.includes('导航')) return 'nav'
+            if (a.includes('点击')) return 'click'
+            if (a.includes('填充')) return 'fill'
+            if (a.includes('等待')) return 'wait'
+            if (a.includes('截图')) return 'shot'
+            if (a.includes('脚本')) return 'script'
+            return 'click'
         }
 
-        const p = graph.clientToLocal(ev.clientX, ev.clientY)
-        const node = addNodeAt(type, Math.max(40, p.x - 130), Math.max(40, p.y - 48))
+        ;(async function () {
+            setStatus('加载 X6 资源中...')
+            const tried = []
 
-        // 自动连线：与最后一步连接
-        const ordered = getOrderedNodes().filter((n) => n.id !== node.id)
-        if (ordered.length) {
-          const last = ordered[ordered.length - 1]
-          connect(last.id, node.id)
-        }
+            for (const url of X6_SCRIPT_CDNS) {
+                tried.push(url)
+                try {
+                    setStatus('加载中：' + url)
+                    await loadScript(url)
+                    if (window.X6 && window.X6.Graph) {
+                        console.log('[x6] loaded from', url)
+                        boot()
+                        return
+                    }
+                } catch (e) {
+                    console.error(e)
+                }
+            }
 
-        selectedId = node.id
-        try { graph.select(node) } catch (e) {}
-        syncAll('drag:add')
-        setStatus('已添加步骤：' + presetForType(type).title)
-      })
-
-      // 首次渲染同步
-      syncAll('boot')
-      setStatus('就绪：拖拽添加步骤；右侧列表与画布同步')
-    }
-
-    function inferTypeFromAction(action) {
-      const a = String(action || '')
-      if (a.includes('导航')) return 'nav'
-      if (a.includes('点击')) return 'click'
-      if (a.includes('填充')) return 'fill'
-      if (a.includes('等待')) return 'wait'
-      if (a.includes('截图')) return 'shot'
-      if (a.includes('脚本')) return 'script'
-      return 'click'
-    }
-
-    ;(async function() {
-      setStatus('加载 X6 资源中...')
-      const tried = []
-
-      for (const url of X6_SCRIPT_CDNS) {
-        tried.push(url)
-        try {
-          setStatus('加载中：' + url)
-          await loadScript(url)
-          if (window.X6 && window.X6.Graph) {
-            console.log('[x6] loaded from', url)
-            boot()
-            return
-          }
-        } catch (e) {
-          console.error(e)
-        }
-      }
-
-      showFallback('无法访问可用的 CDN 资源', tried)
-      setStatus('加载失败')
+            showFallback('无法访问可用的 CDN 资源', tried)
+            setStatus('加载失败')
+        })()
     })()
-  })()
 </script>
 </body>
 </html>

@@ -13,25 +13,14 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.concurrent.Worker;
 import javafx.fxml.FXML;
-import javafx.scene.control.Button;
-import javafx.scene.control.CheckBox;
-import javafx.scene.control.ComboBox;
-import javafx.scene.control.ListView;
-import javafx.scene.control.SplitPane;
-import javafx.scene.control.TableColumn;
-import javafx.scene.control.TableView;
-import javafx.scene.control.TextArea;
-import javafx.scene.control.TextField;
-import javafx.scene.control.ToggleButton;
+import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
-import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
-
 import netscape.javascript.JSObject;
 
 import java.io.IOException;
@@ -59,7 +48,7 @@ public class MainController extends BaseController {
     @FXML private Button addStepButton;
     @FXML private Button cancelEditButton;
 
-    // 可视化流程编辑器（JavaFX WebView）
+    // 可视化流程编辑器(JavaFX WebView)
     @FXML private ToggleButton visualEditorToggle;
     @FXML private StackPane editorStackPane;
     @FXML private SplitPane listEditorSplitPane;
@@ -107,12 +96,12 @@ public class MainController extends BaseController {
         ));
         actionComboBox.getSelectionModel().selectFirst();
 
-        // 初始化“添加/保存修改”按钮默认文案
+        // 初始化"添加/保存修改"按钮默认文案
         if (addStepButton != null) {
             addStepButtonDefaultText = addStepButton.getText();
         }
 
-        // 点击步骤行后，自动把内容回填到左侧编辑区，用于修改
+        // 点击步骤行后,自动把内容回填到左侧编辑区,用于修改
         stepListView.getSelectionModel().selectedIndexProperty().addListener((obs, oldVal, newVal) -> {
             int idx = newVal == null ? -1 : newVal.intValue();
             if (idx < 0 || idx >= taskSteps.size()) {
@@ -160,14 +149,14 @@ public class MainController extends BaseController {
 
         int selectedIndex = stepListView.getSelectionModel().getSelectedIndex();
         if (editingMode && selectedIndex >= 0 && selectedIndex < taskSteps.size() && selectedIndex == editingIndex) {
-            // 编辑模式：更新所选步骤
+            // 编辑模式:更新所选步骤
             taskSteps.set(selectedIndex, step);
             stepListView.getItems().set(selectedIndex, formatStep(step));
             appendLog(logTextArea, "✓ 已更新步骤: " + formatStep(step));
 
             handleCancelEdit();
         } else {
-            // 新增模式：添加步骤
+            // 新增模式:添加步骤
             taskSteps.add(step);
             stepListView.getItems().add(formatStep(step));
             appendLog(logTextArea, "✓ 已添加步骤: " + formatStep(step));
@@ -354,7 +343,7 @@ public class MainController extends BaseController {
                 default -> null;
             };
         } catch (NumberFormatException e) {
-            showWarning("参数错误", "等待步骤的超时时间必须是数字（毫秒）");
+            showWarning("参数错误", "等待步骤的超时时间必须是数字(毫秒)");
             return null;
         }
     }
@@ -420,12 +409,42 @@ public class MainController extends BaseController {
     @FXML
     private void handleToggleVisualEditor() {
         boolean toVisual = visualEditorToggle != null && visualEditorToggle.isSelected();
-        setVisualEditorVisible(toVisual);
         if (visualEditorToggle != null) {
             visualEditorToggle.setText(toVisual ? "返回列表编辑" : "可视化编排");
         }
+
+        setVisualEditorVisible(toVisual);
+
         if (toVisual) {
-            syncStepsToGraph();
+            // 多级延迟确保布局完成
+            Platform.runLater(() -> {
+                Platform.runLater(() -> {
+                    Platform.runLater(() -> {
+                        syncStepsToGraph();
+                        forceWebViewRefresh();
+                    });
+                });
+            });
+        }
+    }
+
+    private void forceWebViewRefresh() {
+        if (flowWebView == null || flowWebEngine == null || !flowEditorReady) return;
+
+        try {
+            // 强制WebView重新计算尺寸和布局
+            flowWebView.requestLayout();
+
+            // 调用画布适配方法
+            Platform.runLater(() -> {
+                try {
+                    flowWebEngine.executeScript("window.__fit && window.__fit()");
+                } catch (Exception e) {
+                    // 忽略
+                }
+            });
+        } catch (Exception e) {
+            // 忽略
         }
     }
 
@@ -435,13 +454,45 @@ public class MainController extends BaseController {
     }
 
     private void setVisualEditorVisible(boolean visual) {
-        if (visualEditorPane != null) {
-            visualEditorPane.setVisible(visual);
-            visualEditorPane.setManaged(visual);
-        }
-        if (listEditorSplitPane != null) {
-            listEditorSplitPane.setVisible(!visual);
-            listEditorSplitPane.setManaged(!visual);
+        if (visual) {
+            // 先设置可见,再隐藏列表
+            if (visualEditorPane != null) {
+                visualEditorPane.setVisible(true);
+                visualEditorPane.setManaged(true);
+            }
+
+            // 延迟隐藏列表编辑器,避免闪烁
+            Platform.runLater(() -> {
+                if (listEditorSplitPane != null) {
+                    listEditorSplitPane.setVisible(false);
+                    listEditorSplitPane.setManaged(false);
+                }
+
+                // 强制父容器布局
+                if (editorStackPane != null) {
+                    editorStackPane.requestLayout();
+                    editorStackPane.layout();
+                }
+            });
+        } else {
+            // 先设置列表可见,再隐藏可视化
+            if (listEditorSplitPane != null) {
+                listEditorSplitPane.setVisible(true);
+                listEditorSplitPane.setManaged(true);
+            }
+
+            Platform.runLater(() -> {
+                if (visualEditorPane != null) {
+                    visualEditorPane.setVisible(false);
+                    visualEditorPane.setManaged(false);
+                }
+
+                // 强制父容器布局
+                if (editorStackPane != null) {
+                    editorStackPane.requestLayout();
+                    editorStackPane.layout();
+                }
+            });
         }
     }
 
@@ -458,11 +509,32 @@ public class MainController extends BaseController {
         flowWebEngine = flowWebView.getEngine();
         flowWebEngine.setJavaScriptEnabled(true);
 
+        // 监听WebView尺寸变化
+        flowWebView.widthProperty().addListener((obs, oldVal, newVal) -> {
+            if (flowEditorReady && visualEditorPane != null && visualEditorPane.isVisible()) {
+                forceWebViewRefresh();
+            }
+        });
+
+        flowWebView.heightProperty().addListener((obs, oldVal, newVal) -> {
+            if (flowEditorReady && visualEditorPane != null && visualEditorPane.isVisible()) {
+                forceWebViewRefresh();
+            }
+        });
+
         flowWebEngine.getLoadWorker().stateProperty().addListener((obs, oldState, newState) -> {
             if (newState == Worker.State.SUCCEEDED) {
                 flowEditorReady = true;
                 installWebViewBridge();
-                Platform.runLater(this::syncStepsToGraph);
+                // 延迟执行初始同步
+                Platform.runLater(() -> {
+                    try {
+                        Thread.sleep(200);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    syncStepsToGraph();
+                });
             }
             if (newState == Worker.State.FAILED) {
                 Throwable ex = flowWebEngine.getLoadWorker().getException();
@@ -505,7 +577,7 @@ public class MainController extends BaseController {
                 if (stepsJson == null) stepsJson = "[]";
                 if (reason == null) reason = "";
 
-                // 我们主动 setTaskSteps 时，页面会触发一次回调；忽略避免循环
+                // 我们主动 setTaskSteps 时,页面会触发一次回调;忽略避免循环
                 if ("setTaskSteps".equals(reason) || "boot".equals(reason)) {
                     return;
                 }
@@ -532,7 +604,7 @@ public class MainController extends BaseController {
     private String buildStepsJsonForGraph() {
         JsonArray arr = new JsonArray();
 
-        // 头部导航步骤（从任务配置读取）
+        // 头部导航步骤(从任务配置读取)
         String url = urlTextField == null ? "" : urlTextField.getText();
         JsonObject nav = new JsonObject();
         nav.addProperty("id", "s0");
@@ -551,7 +623,7 @@ public class MainController extends BaseController {
             String type = stepTypeToFlowType(step.getType());
             String fieldLabel = flowFieldLabel(type);
 
-            // 当前 flow-editor.html 仅提供一个输入框：这里优先展示 selector，其次 value
+            // 当前 flow-editor.html 仅提供一个输入框:这里优先展示 selector,其次 value
             String fieldValue = (step.getSelector() != null && !step.getSelector().isBlank()) ? step.getSelector() : step.getValue();
             if (fieldValue == null) fieldValue = "";
 
@@ -609,7 +681,7 @@ public class MainController extends BaseController {
                 String label = o.has("label") ? o.get("label").getAsString() : "";
                 String value = o.has("value") ? o.get("value").getAsString() : "";
 
-                // 第一条 nav：同步到 URL 输入框，不计入 taskSteps
+                // 第一条 nav:同步到 URL 输入框,不计入 taskSteps
                 if (i == 0 && "nav".equals(type)) {
                     if (urlTextField != null) urlTextField.setText(value == null ? "" : value);
                     continue;
@@ -640,12 +712,12 @@ public class MainController extends BaseController {
                         step.setValue(value);
                     }
                     case "nav" -> {
-                        // 非首条 nav：作为普通步骤
+                        // 非首条 nav:作为普通步骤
                         step.setType(TaskStep.StepType.NAVIGATE);
                         step.setValue(value);
                     }
                     default -> {
-                        // fallback：按 action 推断
+                        // fallback:按 action 推断
                         TaskStep.StepType t = fromActionLabel(action);
                         step.setType(t);
                         step.setValue(value);
@@ -655,7 +727,7 @@ public class MainController extends BaseController {
                 newSteps.add(step);
             }
 
-            // 刷新列表（会触发 selection listener，这里先清空选择）
+            // 刷新列表(会触发 selection listener,这里先清空选择)
             handleCancelEdit();
             taskSteps.setAll(newSteps);
             stepListView.getItems().clear();
