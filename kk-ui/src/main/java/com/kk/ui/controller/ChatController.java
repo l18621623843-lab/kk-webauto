@@ -19,11 +19,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+
 
 @Component
 @RequiredArgsConstructor
@@ -43,8 +45,18 @@ public class ChatController extends BaseController {
     @FXML private Label googleStatusLabel;
     @FXML private Label vpnTrafficLabel;
 
+    @FXML private TextArea selfAddrsArea;
+    @FXML private TextField relayMultiaddrField;
+    @FXML private Label relayStatusLabel;
+    @FXML private TextArea relayAddrsArea;
+
+    @FXML private Label mdnsStatusLabel;
+    @FXML private Label stunStatusLabel;
+
+
     @FXML private TextArea chatHistoryArea;
     @FXML private TextField messageInputField;
+
 
     private volatile String currentRemotePeerId;
 
@@ -87,8 +99,19 @@ public class ChatController extends BaseController {
         refreshBootstrapStatus(false);
 
         refreshSelfPeerId();
+        refreshShareAddrs(false);
+        refreshRelayStatus(false);
+        refreshMdnsStatus(false);
+        refreshStunStatus(false);
+
+        scheduler.scheduleAtFixedRate(() -> refreshShareAddrs(false), 2, 5, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> refreshRelayStatus(false), 2, 5, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> refreshMdnsStatus(false), 2, 5, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> refreshStunStatus(false), 2, 5, TimeUnit.SECONDS);
+
 
         // 启动后自动检测一次，并定时刷新状态
+
         if (googleStatusLabel != null) {
             googleStatusLabel.setText("检测中...");
         }
@@ -194,8 +217,164 @@ public class ChatController extends BaseController {
         });
     }
 
+    private void refreshShareAddrs(boolean writeLog) {
+        List<String> addrs = libp2pEngine.getShareAddrs();
+        String text = addrs.isEmpty() ? "-" : String.join("\n", addrs);
+
+        runOnUIThread(() -> {
+            if (selfAddrsArea != null) {
+                selfAddrsArea.setText(text);
+            }
+            if (writeLog) {
+                appendLog(chatHistoryArea, "可分享地址已刷新");
+            }
+        });
+    }
+
+    @FXML
+    private void handleCopyShareAddrs() {
+        String text = selfAddrsArea == null ? null : selfAddrsArea.getText();
+        if (text == null || text.isBlank() || "-".equals(text)) {
+            showWarning("提示", "当前没有可分享地址");
+            return;
+        }
+
+        ClipboardContent content = new ClipboardContent();
+        content.putString(text.trim());
+        Clipboard.getSystemClipboard().setContent(content);
+        appendLog(chatHistoryArea, "已复制可分享地址");
+    }
+
+    @FXML
+    private void handleRelayReserveNow() {
+        String relay = relayMultiaddrField == null ? null : relayMultiaddrField.getText();
+        if (relay == null || relay.isBlank()) {
+            libp2pEngine.relayReserveNow();
+            refreshRelayStatus(true);
+            return;
+        }
+
+        String relayAddr = relay.trim();
+        if (relayStatusLabel != null) {
+            relayStatusLabel.setText("预约中...");
+        }
+
+        libp2pEngine.reserveRelay(relayAddr)
+                .thenRun(() -> runOnUIThread(() -> {
+                    refreshRelayStatus(true);
+                    appendLog(chatHistoryArea, "Relay 预约成功: " + relayAddr);
+                }))
+                .exceptionally(ex -> {
+                    runOnUIThread(() -> {
+                        refreshRelayStatus(false);
+                        showError("Relay 预约失败", ex == null ? "unknown" : (ex.getMessage() == null ? String.valueOf(ex) : ex.getMessage()));
+                    });
+                    return null;
+                });
+    }
+
+    @FXML
+    private void handleRefreshRelay() {
+        refreshRelayStatus(true);
+    }
+
+    private void refreshRelayStatus(boolean writeLog) {
+        boolean enabled = libp2pEngine.isRelayEnabled();
+        int attempted = libp2pEngine.getRelayAttempted();
+        int reserved = libp2pEngine.getRelayReserved();
+        String lastErr = libp2pEngine.getLastRelayError();
+
+        String text = (enabled ? "启用" : "禁用") + " | 已预约 " + reserved + "/" + attempted + (lastErr == null || lastErr.isBlank() ? "" : (" | 最近错误: " + lastErr));
+
+        List<String> relayAddrs = libp2pEngine.getRelayShareAddrs();
+        String relayAddrText = relayAddrs.isEmpty() ? "-" : String.join("\n", relayAddrs);
+
+        runOnUIThread(() -> {
+            if (relayStatusLabel != null) {
+                relayStatusLabel.setText(text);
+            }
+            if (relayAddrsArea != null) {
+                relayAddrsArea.setText(relayAddrText);
+            }
+            if (writeLog) {
+                appendLog(chatHistoryArea, "Relay 状态: " + text);
+            }
+        });
+    }
+
+    @FXML
+    private void handleCopyRelayAddrs() {
+        String text = relayAddrsArea == null ? null : relayAddrsArea.getText();
+        if (text == null || text.isBlank() || "-".equals(text)) {
+            showWarning("提示", "当前没有 Relay 地址（请先预约）");
+            return;
+        }
+
+        ClipboardContent content = new ClipboardContent();
+        content.putString(text.trim());
+        Clipboard.getSystemClipboard().setContent(content);
+        appendLog(chatHistoryArea, "已复制 Relay 地址");
+    }
+
+    @FXML
+    private void handleRefreshMdns() {
+        refreshMdnsStatus(true);
+    }
+
+    private void refreshMdnsStatus(boolean writeLog) {
+        boolean enabled = libp2pEngine.isMdnsEnabled();
+        int found = libp2pEngine.getMdnsPeersFound();
+        String last = libp2pEngine.getLastMdnsPeer();
+
+        String text = (enabled ? "启用" : "禁用") + " | 已发现 " + found + (last == null || last.isBlank() ? "" : (" | 最近: " + last));
+
+        runOnUIThread(() -> {
+            if (mdnsStatusLabel != null) {
+                mdnsStatusLabel.setText(text);
+            }
+            if (writeLog) {
+                appendLog(chatHistoryArea, "mDNS 状态: " + text);
+            }
+        });
+    }
+
+    @FXML
+    private void handleRefreshStun() {
+        refreshStunStatus(true);
+    }
+
+    private void refreshStunStatus(boolean writeLog) {
+        boolean enabled = libp2pEngine.isStunEnabled();
+        int attempted = libp2pEngine.getStunAttempted();
+        int ok = libp2pEngine.getStunSucceeded();
+        String last = libp2pEngine.getLastStunResult();
+        String lastErr = libp2pEngine.getLastStunError();
+
+        String detail;
+        if (last != null && !last.isBlank()) {
+            detail = last;
+        } else if (lastErr != null && !lastErr.isBlank()) {
+            detail = "错误: " + lastErr;
+        } else {
+            detail = "-";
+        }
+
+        String text = (enabled ? "启用" : "禁用") + " | 成功 " + ok + "/" + attempted + " | " + detail;
+
+        runOnUIThread(() -> {
+            if (stunStatusLabel != null) {
+                stunStatusLabel.setText(text);
+            }
+            if (writeLog) {
+                appendLog(chatHistoryArea, "STUN 状态: " + text);
+            }
+        });
+    }
+
     @FXML
     private void handleConnect() {
+
+
         String peerId = remotePeerIdField == null ? null : remotePeerIdField.getText();
         if (peerId == null || peerId.isBlank()) {
             showWarning("提示", "请先输入对方 PeerID");

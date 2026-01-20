@@ -18,6 +18,13 @@ import io.libp2p.core.multistream.ProtocolBinding;
 import io.libp2p.core.multistream.ProtocolDescriptor;
 import io.libp2p.protocol.Identify;
 import io.libp2p.protocol.Ping;
+import io.libp2p.discovery.MDnsDiscovery;
+import io.libp2p.protocol.circuit.CircuitHopProtocol;
+import io.libp2p.protocol.circuit.CircuitStopProtocol;
+import io.libp2p.protocol.circuit.RelayTransport;
+import io.libp2p.transport.tcp.TcpTransport;
+
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -25,15 +32,22 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import kotlin.Pair;
+import kotlin.Unit;
 import lombok.extern.slf4j.Slf4j;
+
 import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
+import java.net.SocketTimeoutException;
+
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -45,12 +59,17 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.security.SecureRandom;
+
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+
 
 // route add 10.8.0.3 mask 255.255.255.255 10.8.0.2
 // route add 10.8.0.2 mask 255.255.255.255 10.8.0.3
@@ -95,8 +114,100 @@ public class Libp2pEngine {
     private final AtomicInteger bootstrapConnected = new AtomicInteger(0);
     private volatile String lastBootstrapError;
 
+    // -------------------- Relay / 内网穿透（circuit-relay v2） --------------------
+
+    @Value("${kk.p2p.relay.enabled:false}")
+    private boolean relayEnabled;
+
+    /**
+     * Relay 模式：
+     * - CLIENT：只作为客户端使用 relay（向 relay 预约并生成 /p2p-circuit 地址）
+     * - HOP：作为 relay 服务端（允许其他节点预约，并转发连接）
+     */
+    @Value("${kk.p2p.relay.mode:CLIENT}")
+    private String relayMode;
+
+    /**
+     * relay 节点地址列表（逗号/换行分隔），每个必须包含 /p2p/<relayPeerId>
+     * 例如：/ip4/1.2.3.4/tcp/4001/p2p/12D3KooW...
+     */
+    @Value("${kk.p2p.relay.addrs:}")
+    private String relayAddrs;
+
+    @Value("${kk.p2p.relay.connectTimeoutSeconds:8}")
+    private int relayConnectTimeoutSeconds;
+
+    @Value("${kk.p2p.relay.hop.concurrent:128}")
+    private int relayHopConcurrent;
+
+    private final AtomicInteger relayAttempted = new AtomicInteger(0);
+    private final AtomicInteger relayReserved = new AtomicInteger(0);
+    private volatile String lastRelayError;
+
+    private volatile RelayTransport relayTransport;
+    private volatile CircuitStopProtocol.Binding circuitStopBinding;
+    private volatile CircuitHopProtocol.Binding circuitHopBinding;
+
+    private final ScheduledExecutorService relayScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "kk-p2p-relay");
+        t.setDaemon(true);
+        return t;
+    });
+
+    private final ConcurrentHashMap<String, RelayReservation> relayReservations = new ConcurrentHashMap<>();
+
+    private static final class RelayReservation {
+        final Multiaddr relayAddr; // must include /p2p/relayId
+        final CircuitHopProtocol.HopController hopController;
+        volatile long expiryEpochSeconds;
+
+        private RelayReservation(Multiaddr relayAddr, CircuitHopProtocol.HopController hopController, long expiryEpochSeconds) {
+            this.relayAddr = relayAddr;
+            this.hopController = hopController;
+            this.expiryEpochSeconds = expiryEpochSeconds;
+        }
+    }
+
+    // -------------------- 发现机制（mDNS：局域网自动发现） --------------------
+
+    @Value("${kk.p2p.discovery.mdns.enabled:true}")
+    private boolean mdnsEnabled;
+
+    @Value("${kk.p2p.discovery.mdns.serviceTag:_ipfs-discovery._udp.local.}")
+    private String mdnsServiceTag;
+
+    @Value("${kk.p2p.discovery.mdns.queryIntervalSeconds:120}")
+    private int mdnsQueryIntervalSeconds;
+
+    private volatile MDnsDiscovery mdnsDiscovery;
+    private final AtomicInteger mdnsPeersFound = new AtomicInteger(0);
+    private volatile String lastMdnsPeer;
+
+    // -------------------- STUN（仅用于探测公网 UDP 映射，辅助判断网络环境） --------------------
+
+    @Value("${kk.p2p.nat.stun.enabled:false}")
+    private boolean stunEnabled;
+
+    /**
+     * STUN 服务器列表（逗号/换行分隔），形如：stun.l.google.com:19302
+     */
+    @Value("${kk.p2p.nat.stun.servers:stun.l.google.com:19302,stun1.l.google.com:19302}")
+    private String stunServers;
+
+    @Value("${kk.p2p.nat.stun.timeoutMs:1500}")
+    private int stunTimeoutMs;
+
+    private final AtomicInteger stunAttempted = new AtomicInteger(0);
+    private final AtomicInteger stunSucceeded = new AtomicInteger(0);
+    private volatile String lastStunResult;
+    private volatile String lastStunError;
+
+    private final SecureRandom stunRandom = new SecureRandom();
+
     // 缓存已建立的 VPN 流，Key 为远端 PeerID 的 String
     private final ConcurrentHashMap<String, Stream> activeStreams = new ConcurrentHashMap<>();
+
+
 
     // VPN 流量统计（字节数）
     private final AtomicLong vpnTxBytesTotal = new AtomicLong(0);
@@ -130,10 +241,59 @@ public class Libp2pEngine {
 
             int listenPort = Integer.getInteger("kk.p2p.listenPort", 0);
 
+            String relayModeNorm = relayMode == null ? "CLIENT" : relayMode.trim().toUpperCase();
+            boolean hopMode = "HOP".equals(relayModeNorm);
+
+            circuitStopBinding = new CircuitStopProtocol.Binding(new CircuitStopProtocol());
+
+            CircuitHopProtocol.RelayManager relayManager;
+            if (hopMode) {
+                relayManager = CircuitHopProtocol.RelayManager.limitTo(privKey, selfPeerId, relayHopConcurrent);
+                log.info("Relay 模式: HOP（本节点将作为 relay 服务端，允许预约/转发连接）");
+            } else {
+                relayManager = new CircuitHopProtocol.RelayManager() {
+                    @Override
+                    public boolean hasReservation(PeerId source) {
+                        return false;
+                    }
+
+                    @Override
+                    public java.util.Optional<CircuitHopProtocol.Reservation> createReservation(PeerId requestor, Multiaddr addr) {
+                        return java.util.Optional.empty();
+                    }
+
+                    @Override
+                    public java.util.Optional<CircuitHopProtocol.Reservation> allowConnection(PeerId target, PeerId initiator) {
+                        return java.util.Optional.empty();
+                    }
+                };
+                log.info("Relay 模式: CLIENT（本节点仅使用 relay，不对外提供 hop）");
+            }
+
+            circuitHopBinding = new CircuitHopProtocol.Binding(relayManager, circuitStopBinding);
+
             host = new HostBuilder()
+                    .transport(
+                            TcpTransport::new,
+                            upgrader -> {
+                                relayTransport = new RelayTransport(
+                                        circuitHopBinding,
+                                        circuitStopBinding,
+                                        upgrader,
+                                        h -> List.of(),
+                                        relayScheduler
+                                );
+                                // 禁用 RelayTransport 自带的自动选 relay/预约逻辑（该版本实现不完整），由本引擎手动控制预约。
+                                relayTransport.setRelayCount(0);
+                                return relayTransport;
+                            }
+                    )
+
                     .protocol(
                             new Ping(),
                             new Identify(),
+                            circuitStopBinding,
+                            circuitHopBinding,
                             createPexProtocolBinding(),
                             createChatProtocolBinding(),
                             createVpnProtocolBinding()
@@ -145,18 +305,40 @@ public class Libp2pEngine {
             host.start().get();
             running.set(true);
 
+            if (mdnsEnabled) {
+                startMdnsDiscovery();
+            } else {
+                log.info("mDNS 发现已禁用（kk.p2p.discovery.mdns.enabled=false）");
+            }
+
+            if (stunEnabled) {
+                relayScheduler.scheduleAtFixedRate(this::stunProbeSafely, 2, 30, TimeUnit.SECONDS);
+                stunProbeSafely();
+            } else {
+                log.info("STUN 探测已禁用（kk.p2p.nat.stun.enabled=false）");
+            }
+
+            if (relayEnabled) {
+
+                relayScheduler.scheduleAtFixedRate(this::renewRelayReservationsSafely, 15, 15, TimeUnit.SECONDS);
+                relayReserveNow();
+            } else {
+                log.info("relay 已禁用（kk.p2p.relay.enabled=false）");
+            }
+
             log.info("Libp2p 节点启动成功！");
             log.info("你的 PeerID: {}", selfPeerId.toBase58());
             log.info("监听地址: {}", host.listenAddresses());
             // 注意：listen 地址可能包含 0.0.0.0 / :: 这类“通配地址”，无法用于对端拨号。
-            // 这里输出替换后的“可分享地址”（用于局域网直连）。公网/NAT 情况需由对方提供可达的公网 IP/端口或后续接入 relay/hole-punch。
-            log.info("可分享地址(用于直连): {}", getAdvertiseAddrs());
+            // 这里输出替换后的“可分享地址”（用于局域网直连/Relay）。
+            log.info("可分享地址(用于直连/Relay): {}", getAdvertiseAddrs());
 
             if (bootstrapEnabled) {
                 bootstrapNow();
             } else {
                 log.info("bootstrap 已禁用（kk.p2p.bootstrap.enabled=false）");
             }
+
         } catch (Exception e) {
             log.error("Libp2p 引擎启动失败", e);
             throw new RuntimeException("Failed to start Libp2p engine", e);
@@ -241,7 +423,485 @@ public class Libp2pEngine {
         return lastBootstrapError;
     }
 
+    public boolean isRelayEnabled() {
+        return relayEnabled;
+    }
+
+    public int getRelayAttempted() {
+        return relayAttempted.get();
+    }
+
+    public int getRelayReserved() {
+        return relayReserved.get();
+    }
+
+    public String getLastRelayError() {
+        return lastRelayError;
+    }
+
+    public List<String> getShareAddrs() {
+        if (host == null || selfPeerId == null) {
+            return List.of();
+        }
+        List<Multiaddr> addrs = getAdvertiseAddrs();
+        List<String> out = new ArrayList<>(addrs.size());
+        for (Multiaddr a : addrs) {
+            out.add(a.toString());
+        }
+        return out;
+    }
+
+    public List<String> getRelayShareAddrs() {
+        if (host == null || selfPeerId == null) {
+            return List.of();
+        }
+        String self = selfPeerId.toBase58();
+        List<String> out = new ArrayList<>();
+        for (RelayReservation r : relayReservations.values()) {
+            out.add(toCircuitAddr(r.relayAddr.toString(), self));
+        }
+        return out;
+    }
+
+    public boolean isMdnsEnabled() {
+        return mdnsEnabled;
+    }
+
+    public int getMdnsPeersFound() {
+        return mdnsPeersFound.get();
+    }
+
+    public String getLastMdnsPeer() {
+        return lastMdnsPeer;
+    }
+
+    public boolean isStunEnabled() {
+        return stunEnabled;
+    }
+
+    public int getStunAttempted() {
+        return stunAttempted.get();
+    }
+
+    public int getStunSucceeded() {
+        return stunSucceeded.get();
+    }
+
+    public String getLastStunResult() {
+        return lastStunResult;
+    }
+
+    public String getLastStunError() {
+        return lastStunError;
+    }
+
+    private void startMdnsDiscovery() {
+        if (!mdnsEnabled || host == null || !running.get()) {
+            return;
+        }
+
+        try {
+            int interval = Math.max(10, mdnsQueryIntervalSeconds);
+            String tag = (mdnsServiceTag == null || mdnsServiceTag.isBlank()) ? "_ipfs-discovery._udp.local." : mdnsServiceTag.trim();
+
+            MDnsDiscovery d = new MDnsDiscovery(host, tag, interval, null);
+            d.addHandler(peerInfo -> {
+                onMdnsPeerFound(peerInfo);
+                return Unit.INSTANCE;
+            });
+            mdnsDiscovery = d;
+
+            d.start().exceptionally(ex -> {
+                log.debug("mDNS 启动失败", ex);
+                return null;
+            });
+
+            log.info("mDNS 发现已启动: serviceTag={}, interval={}s", tag, interval);
+        } catch (Exception e) {
+            log.debug("mDNS 初始化失败", e);
+        }
+    }
+
+    private void stopMdnsDiscovery() {
+        MDnsDiscovery d = mdnsDiscovery;
+        mdnsDiscovery = null;
+        if (d == null) {
+            return;
+        }
+        try {
+            d.stop().exceptionally(ex -> null);
+        } catch (Exception ignore) {
+        }
+    }
+
+    private void onMdnsPeerFound(io.libp2p.core.PeerInfo peerInfo) {
+        if (peerInfo == null || host == null) {
+            return;
+        }
+
+        String pid = null;
+        try {
+            pid = peerInfo.getPeerId().toBase58();
+        } catch (Exception ignore) {
+        }
+
+        if (pid == null || pid.isBlank() || (selfPeerId != null && pid.equals(selfPeerId.toBase58()))) {
+            return;
+        }
+
+        try {
+            List<Multiaddr> addrs = peerInfo.getAddresses();
+            if (addrs == null || addrs.isEmpty()) {
+                return;
+            }
+
+
+            peerAddrCache.put(pid, addrs);
+            try {
+                host.getAddressBook().addAddrs(PeerId.fromBase58(pid), ADDR_TTL_MS, addrs.toArray(new Multiaddr[0])).exceptionally(ex -> null);
+            } catch (Exception ignore) {
+            }
+
+            lastMdnsPeer = pid + " @ " + addrs.get(0);
+            int n = mdnsPeersFound.incrementAndGet();
+            log.info("mDNS 发现对等节点({}): {}", n, lastMdnsPeer);
+        } catch (Exception e) {
+            log.debug("处理 mDNS peer 失败", e);
+        }
+    }
+
+    private void stunProbeSafely() {
+        if (!stunEnabled || !running.get()) {
+            return;
+        }
+
+        try {
+            InetSocketAddress mapped = stunProbeAny();
+            if (mapped != null) {
+                lastStunResult = mapped.getAddress().getHostAddress() + ":" + mapped.getPort();
+                lastStunError = null;
+                stunSucceeded.incrementAndGet();
+            }
+        } catch (Exception e) {
+            lastStunError = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        }
+    }
+
+    private InetSocketAddress stunProbeAny() throws Exception {
+        List<InetSocketAddress> servers = parseStunServers(stunServers);
+        if (servers.isEmpty()) {
+            throw new IllegalStateException("stun servers is empty");
+        }
+
+        Exception last = null;
+        for (InetSocketAddress s : servers) {
+            stunAttempted.incrementAndGet();
+            try {
+                InetSocketAddress mapped = stunBindingRequest(s, stunTimeoutMs);
+                if (mapped != null) {
+                    return mapped;
+                }
+            } catch (Exception e) {
+                last = e;
+            }
+        }
+        if (last != null) {
+            throw last;
+        }
+        return null;
+    }
+
+    private static List<InetSocketAddress> parseStunServers(String servers) {
+        String s = servers == null ? "" : servers.trim();
+        if (s.isBlank()) {
+            return List.of();
+        }
+
+        String[] parts = s.split("[\\r\\n,]+");
+        List<InetSocketAddress> out = new ArrayList<>();
+        for (String p : parts) {
+            String v = p == null ? "" : p.trim();
+            if (v.isBlank()) {
+                continue;
+            }
+
+            String host;
+            int port;
+            int idx = v.lastIndexOf(':');
+            if (idx > 0 && idx < v.length() - 1) {
+                host = v.substring(0, idx).trim();
+                port = Integer.parseInt(v.substring(idx + 1).trim());
+            } else {
+                host = v;
+                port = 19302;
+            }
+
+            if (!host.isBlank()) {
+                out.add(new InetSocketAddress(host, port));
+            }
+        }
+        return out;
+    }
+
+    private InetSocketAddress stunBindingRequest(InetSocketAddress server, int timeoutMs) throws Exception {
+        // RFC5389: Binding Request over UDP, parse XOR-MAPPED-ADDRESS
+        byte[] txId = new byte[12];
+        stunRandom.nextBytes(txId);
+
+        byte[] req = new byte[20];
+        // type: 0x0001
+        req[0] = 0x00;
+        req[1] = 0x01;
+        // length: 0
+        req[2] = 0x00;
+        req[3] = 0x00;
+        // magic cookie: 0x2112A442
+        req[4] = 0x21;
+        req[5] = 0x12;
+        req[6] = (byte) 0xA4;
+        req[7] = 0x42;
+        // transaction id
+        System.arraycopy(txId, 0, req, 8, 12);
+
+        try (DatagramSocket sock = new DatagramSocket()) {
+            sock.setSoTimeout(Math.max(200, timeoutMs));
+            DatagramPacket p = new DatagramPacket(req, req.length, server);
+            sock.send(p);
+
+            byte[] buf = new byte[512];
+            DatagramPacket resp = new DatagramPacket(buf, buf.length);
+            sock.receive(resp);
+
+            return parseStunResponse(resp.getData(), resp.getLength(), txId);
+        } catch (SocketTimeoutException e) {
+            throw new SocketTimeoutException("STUN timeout: " + server);
+        }
+    }
+
+    private static InetSocketAddress parseStunResponse(byte[] data, int len, byte[] txId) {
+        if (data == null || len < 20) {
+            return null;
+        }
+
+        int msgType = ((data[0] & 0xFF) << 8) | (data[1] & 0xFF);
+        if (msgType != 0x0101) { // Binding Success Response
+            return null;
+        }
+
+        int msgLen = ((data[2] & 0xFF) << 8) | (data[3] & 0xFF);
+        if (20 + msgLen > len) {
+            return null;
+        }
+
+        // magic cookie
+        int cookie = ((data[4] & 0xFF) << 24) | ((data[5] & 0xFF) << 16) | ((data[6] & 0xFF) << 8) | (data[7] & 0xFF);
+        if (cookie != 0x2112A442) {
+            return null;
+        }
+
+        // transaction id verify
+        for (int i = 0; i < 12; i++) {
+            if (data[8 + i] != txId[i]) {
+                return null;
+            }
+        }
+
+        int pos = 20;
+        while (pos + 4 <= 20 + msgLen) {
+            int type = ((data[pos] & 0xFF) << 8) | (data[pos + 1] & 0xFF);
+            int alen = ((data[pos + 2] & 0xFF) << 8) | (data[pos + 3] & 0xFF);
+            pos += 4;
+            if (pos + alen > 20 + msgLen) {
+                return null;
+            }
+
+            if (type == 0x0020 && alen >= 8) { // XOR-MAPPED-ADDRESS
+                int family = data[pos + 1] & 0xFF;
+                int xPort = ((data[pos + 2] & 0xFF) << 8) | (data[pos + 3] & 0xFF);
+                int port = xPort ^ (0x2112);
+
+                if (family == 0x01 && alen >= 8) { // IPv4
+                    byte[] ip = new byte[4];
+                    ip[0] = (byte) ((data[pos + 4] & 0xFF) ^ 0x21);
+                    ip[1] = (byte) ((data[pos + 5] & 0xFF) ^ 0x12);
+                    ip[2] = (byte) ((data[pos + 6] & 0xFF) ^ 0xA4);
+                    ip[3] = (byte) ((data[pos + 7] & 0xFF) ^ 0x42);
+                    try {
+                        return new InetSocketAddress(InetAddress.getByAddress(ip), port);
+                    } catch (Exception ignore) {
+                        return null;
+                    }
+                }
+
+                if (family == 0x02 && alen >= 20) { // IPv6
+                    byte[] ip = new byte[16];
+                    // cookie (4 bytes) + txId (12 bytes) = 16 bytes xor pad
+                    byte[] pad = new byte[16];
+                    pad[0] = 0x21;
+                    pad[1] = 0x12;
+                    pad[2] = (byte) 0xA4;
+                    pad[3] = 0x42;
+                    System.arraycopy(txId, 0, pad, 4, 12);
+                    for (int i = 0; i < 16; i++) {
+                        ip[i] = (byte) ((data[pos + 4 + i] & 0xFF) ^ (pad[i] & 0xFF));
+                    }
+                    try {
+                        return new InetSocketAddress(InetAddress.getByAddress(ip), port);
+                    } catch (Exception ignore) {
+                        return null;
+                    }
+                }
+            }
+
+            // 4-byte padding
+            pos += alen;
+            int pad = (4 - (alen % 4)) % 4;
+            pos += pad;
+        }
+
+        return null;
+    }
+
+    public void relayReserveNow() {
+
+        if (!relayEnabled || host == null || !running.get()) {
+            return;
+        }
+
+        List<String> addrs = resolveRelayAddrs();
+        if (addrs.isEmpty()) {
+            log.info("relay 列表为空，跳过预约");
+            return;
+        }
+
+        for (String s : addrs) {
+            reserveRelay(s).exceptionally(ex -> null);
+        }
+    }
+
+    public CompletableFuture<Void> reserveRelay(String relayMultiaddr) {
+        if (!running.get()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("engine is not running"));
+        }
+        if (relayMultiaddr == null || relayMultiaddr.isBlank()) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("relay multiaddr is blank"));
+        }
+
+        final Multiaddr addr;
+        try {
+            addr = Multiaddr.fromString(relayMultiaddr.trim());
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid relay multiaddr", e));
+        }
+
+        String relayPeerIdStr = extractPeerIdFromMultiaddr(addr);
+        if (relayPeerIdStr == null || relayPeerIdStr.isBlank()) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("relay multiaddr missing /p2p/<peerId>"));
+        }
+
+        final PeerId relayPeerId;
+        try {
+            relayPeerId = PeerId.fromBase58(relayPeerIdStr);
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid relay peerId", e));
+        }
+
+        relayAttempted.incrementAndGet();
+
+        return host.getNetwork().connect(relayPeerId, addr)
+                .orTimeout(relayConnectTimeoutSeconds, TimeUnit.SECONDS)
+                .thenCompose(conn -> conn.muxerSession().createStream(circuitHopBinding).getController())
+                .thenCompose(ctrl -> ctrl.reserve().thenAccept(res -> {
+                    long expiryEpoch = 0L;
+                    try {
+                        expiryEpoch = res.expiry.toEpochSecond(java.time.ZoneOffset.UTC);
+                    } catch (Exception ignore) {
+                    }
+                    relayReservations.put(relayPeerId.toBase58(), new RelayReservation(addr, ctrl, expiryEpoch));
+                    relayReserved.set(relayReservations.size());
+                }))
+                .exceptionally(ex -> {
+                    lastRelayError = (ex == null ? "unknown" : (ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage()));
+                    log.debug("relay 预约失败: {}", relayMultiaddr, ex);
+                    throw new RuntimeException(ex);
+                });
+    }
+
+    private List<String> resolveRelayAddrs() {
+        String s = relayAddrs == null ? "" : relayAddrs.trim();
+        if (s.isBlank()) {
+            return List.of();
+        }
+
+        String[] parts = s.split("[\\r\\n,]+");
+        List<String> out = new ArrayList<>();
+        for (String p : parts) {
+            String v = p == null ? "" : p.trim();
+            if (!v.isBlank()) {
+                out.add(v);
+            }
+        }
+        return out;
+    }
+
+    private void renewRelayReservationsSafely() {
+        if (!relayEnabled || host == null || !running.get() || relayReservations.isEmpty()) {
+            return;
+        }
+
+        long nowEpoch = System.currentTimeMillis() / 1000;
+        for (var e : relayReservations.entrySet()) {
+            String relayPeerId = e.getKey();
+            RelayReservation r = e.getValue();
+            if (r == null) {
+                continue;
+            }
+
+            long expiry = r.expiryEpochSeconds;
+            if (expiry <= 0L || (expiry - nowEpoch) > 120) {
+                continue;
+            }
+
+            try {
+                r.hopController.reserve()
+                        .orTimeout(relayConnectTimeoutSeconds, TimeUnit.SECONDS)
+                        .thenAccept(res -> {
+                            try {
+                                r.expiryEpochSeconds = res.expiry.toEpochSecond(java.time.ZoneOffset.UTC);
+                            } catch (Exception ignore) {
+                            }
+                        })
+                        .exceptionally(ex -> {
+                            lastRelayError = (ex == null ? "unknown" : (ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage()));
+                            relayReservations.remove(relayPeerId);
+                            relayReserved.set(relayReservations.size());
+                            return null;
+                        });
+            } catch (Exception ex) {
+                lastRelayError = (ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage());
+                relayReservations.remove(relayPeerId);
+                relayReserved.set(relayReservations.size());
+            }
+        }
+    }
+
+    private static String toCircuitAddr(String relayAddrWithP2p, String targetPeerId) {
+        if (relayAddrWithP2p == null) {
+            return null;
+        }
+        String base = relayAddrWithP2p;
+        int idx = base.indexOf("/p2p-circuit");
+        if (idx >= 0) {
+            base = base.substring(0, idx);
+        }
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        return base + "/p2p-circuit/p2p/" + targetPeerId;
+    }
+
     private void tryOpenPex(Connection conn) {
+
         try {
             conn.muxerSession()
                     .createStream(createPexProtocolBinding())
@@ -580,8 +1240,21 @@ public class Libp2pEngine {
 
             out.add(Multiaddr.fromString(ensureP2pComponent(s, selfPeerId.toBase58())));
         }
+
+        // 追加通过 relay 预约生成的 /p2p-circuit 地址（用于内网穿透）
+        for (String s : getRelayShareAddrs()) {
+            if (s == null || s.isBlank()) {
+                continue;
+            }
+            try {
+                out.add(Multiaddr.fromString(s));
+            } catch (Exception ignore) {
+            }
+        }
+
         return out;
     }
+
 
     private static String ensureP2pComponent(String multiaddr, String peerIdStr) {
         if (multiaddr.contains("/p2p/")) {
@@ -1015,7 +1688,18 @@ public class Libp2pEngine {
         });
         chatStreams.clear();
 
+        stopMdnsDiscovery();
+
+        relayReservations.clear();
+
+        relayReserved.set(0);
+        try {
+            relayScheduler.shutdownNow();
+        } catch (Exception ignore) {
+        }
+
         if (host != null) {
+
             try {
                 host.stop().get();
                 log.info("Libp2p 引擎已关闭");

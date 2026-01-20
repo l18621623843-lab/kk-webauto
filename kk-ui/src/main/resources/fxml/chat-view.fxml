@@ -49,7 +49,35 @@
                 <Label text="VPN 流量:" GridPane.rowIndex="6" GridPane.columnIndex="0"/>
                 <Label fx:id="vpnTrafficLabel" text="-" GridPane.rowIndex="6" GridPane.columnIndex="1"/>
                 <Button text="刷新" onAction="#handleRefreshTraffic" GridPane.rowIndex="6" GridPane.columnIndex="2"/>
+
+                <Label text="可分享地址:" GridPane.rowIndex="7" GridPane.columnIndex="0"/>
+                <TextArea fx:id="selfAddrsArea" editable="false" wrapText="true" prefRowCount="2"
+                          style="-fx-font-family: 'Consolas', 'Monaco', monospace;" GridPane.rowIndex="7" GridPane.columnIndex="1"/>
+                <Button text="复制" onAction="#handleCopyShareAddrs" GridPane.rowIndex="7" GridPane.columnIndex="2"/>
+
+                <Label text="Relay 节点:" GridPane.rowIndex="8" GridPane.columnIndex="0"/>
+                <TextField fx:id="relayMultiaddrField" promptText="/ip4/.../tcp/.../p2p/..." GridPane.rowIndex="8" GridPane.columnIndex="1"/>
+                <Button text="预约" onAction="#handleRelayReserveNow" GridPane.rowIndex="8" GridPane.columnIndex="2"/>
+
+                <Label text="Relay 状态:" GridPane.rowIndex="9" GridPane.columnIndex="0"/>
+                <Label fx:id="relayStatusLabel" text="-" GridPane.rowIndex="9" GridPane.columnIndex="1"/>
+                <Button text="刷新" onAction="#handleRefreshRelay" GridPane.rowIndex="9" GridPane.columnIndex="2"/>
+
+                <Label text="Relay 地址:" GridPane.rowIndex="10" GridPane.columnIndex="0"/>
+                <TextArea fx:id="relayAddrsArea" editable="false" wrapText="true" prefRowCount="2"
+                          style="-fx-font-family: 'Consolas', 'Monaco', monospace;" GridPane.rowIndex="10" GridPane.columnIndex="1"/>
+                <Button text="复制" onAction="#handleCopyRelayAddrs" GridPane.rowIndex="10" GridPane.columnIndex="2"/>
+
+                <Label text="mDNS 发现:" GridPane.rowIndex="11" GridPane.columnIndex="0"/>
+                <Label fx:id="mdnsStatusLabel" text="-" GridPane.rowIndex="11" GridPane.columnIndex="1"/>
+                <Button text="刷新" onAction="#handleRefreshMdns" GridPane.rowIndex="11" GridPane.columnIndex="2"/>
+
+                <Label text="STUN(UDP):" GridPane.rowIndex="12" GridPane.columnIndex="0"/>
+                <Label fx:id="stunStatusLabel" text="-" GridPane.rowIndex="12" GridPane.columnIndex="1"/>
+                <Button text="刷新" onAction="#handleRefreshStun" GridPane.rowIndex="12" GridPane.columnIndex="2"/>
             </GridPane>
+
+
         </VBox>
     </top>
 

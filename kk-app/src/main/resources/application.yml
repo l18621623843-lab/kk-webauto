@@ -60,3 +60,29 @@ kk:
       connectTimeoutSeconds: 8
       # 逗号/换行分隔；为空则使用内置 DEFAULT_BOOTSTRAP
       addrs: ""
+
+    # 内网穿透（Relay v2 /p2p-circuit）
+    relay:
+      enabled: false
+      # CLIENT / HOP
+      mode: CLIENT
+      connectTimeoutSeconds: 8
+      # 逗号/换行分隔：/ip4/.../tcp/.../p2p/...
+      addrs: ""
+      hop:
+        concurrent: 128
+
+    # 发现机制：局域网自动发现（mDNS）
+    discovery:
+      mdns:
+        enabled: true
+        serviceTag: _ipfs-discovery._udp.local.
+        queryIntervalSeconds: 120
+
+    # NAT/STUN：仅用于探测公网 UDP 映射（帮助判断网络环境；不保证用于 TCP 直连）
+    nat:
+      stun:
+        enabled: false
+        servers: "stun.l.google.com:19302,stun1.l.google.com:19302"
+        timeoutMs: 1500
+
