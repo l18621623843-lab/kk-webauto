@@ -6,26 +6,27 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.kk</groupId>
-    <artifactId>kk-webauto-parent</artifactId>
+    <artifactId>kk-platform</artifactId>
     <version>1.0.0</version>
     <packaging>pom</packaging>
 
     <modules>
-        <module>kk-webauto-common</module>
-        <module>kk-webauto-core</module>
-        <module>kk-webauto-playwright</module>
-        <module>kk-webauto-ui</module>
-        <module>kk-webauto-app</module>
+        <module>kk-common</module>
+        <module>kk-core</module>
+        <module>kk-playwright</module>
+        <module>kk-ui</module>
+        <module>kk-app</module>
+        <module>kk-tunnel-vpn-p2p</module>
     </modules>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- 版本管理 -->
-        <spring.boot.version>3.2.1</spring.boot.version>
-        <playwright.version>1.41.0</playwright.version>
+        <spring.boot.version>3.5.9</spring.boot.version>
+        <playwright.version>1.57.0</playwright.version>
         <javafx.version>21.0.6</javafx.version>
         <lombok.version>1.18.30</lombok.version>
         <logback.version>1.4.14</logback.version>
@@ -46,22 +47,32 @@
             <!-- 内部模块 -->
             <dependency>
                 <groupId>com.kk</groupId>
-                <artifactId>kk-webauto-common</artifactId>
+                <artifactId>kk-common</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.kk</groupId>
-                <artifactId>kk-webauto-core</artifactId>
+                <artifactId>kk-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.kk</groupId>
-                <artifactId>kk-webauto-playwright</artifactId>
+                <artifactId>kk-playwright</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.kk</groupId>
-                <artifactId>kk-webauto-ui</artifactId>
+                <artifactId>kk-ui</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.kk</groupId>
+                <artifactId>kk-p2p-engine</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.kk</groupId>
+                <artifactId>kk-tunnel-vpn-p2p</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
@@ -126,6 +137,18 @@
             <id>aliyun</id>
             <name>aliyun</name>
             <url>https://maven.aliyun.com/nexus/content/groups/public</url>
+        </repository>
+        <repository>
+            <id>libp2p-jvm-libp2p</id>
+            <url>https://dl.cloudsmith.io/public/libp2p/jvm-libp2p/maven/</url>
+        </repository>
+        <repository>
+            <id>JitPack</id>
+            <url>https://jitpack.io</url>
+        </repository>
+        <repository>
+            <id>Consensys</id>
+            <url>https://artifacts.consensys.net/public/maven/maven/</url>
         </repository>
         <repository>
             <id>jitpack.io</id>

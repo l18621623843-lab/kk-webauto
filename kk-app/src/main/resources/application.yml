@@ -1,0 +1,62 @@
+spring:
+  application:
+    name: kk
+  main:
+    web-application-type: none
+    banner-mode: off
+    allow-bean-definition-overriding: false
+  threads:
+    virtual:
+      # 开启虚拟线程
+      enabled: true
+logging:
+  level:
+    root: INFO
+    com.kk: DEBUG
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/kk-webauto.log
+    max-size: 10MB
+    max-history: 7
+
+# Playwright配置
+automation:
+  playwright:
+    timeout: 30000
+    slow-mo: 50
+    screenshot-path: ./screenshots
+    trace-enabled: false
+  browser:
+    type: chromium  # chromium, firefox, webkit
+    default-headless: false
+    viewport:
+      width: 1920
+      height: 1080
+    user-agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  task:
+    max-concurrent: 3
+    default-delay: 500
+    retry-times: 1
+
+vpn:
+  ip:
+    address: 10.8.0.3
+    mask: 255.255.255.0
+#  target:
+#    peerid: 12D3KooWDxxxEcfm4ni81fhP8wxycZ8vcqQDR7F8Lx2hpZMRzJ17
+
+kk:
+  p2p:
+    # 连接方式：
+    # - AUTO：有 multiaddr 就用；没有就仅用 PeerID（仅当本地已缓存到对端地址/PEX 已学习到时才可能成功）
+    # - MANUAL_ADDR：必须提供对方 multiaddr（推荐）
+    # - PEERID_ONLY：只用 PeerID（依赖缓存/发现能力）
+    connect:
+      mode: AUTO
+    bootstrap:
+      # 是否在启动时尝试连接公网 bootstrap（可用于辅助连通/Identify；不等同于“能通过 PeerID 自动发现对端”）
+      enabled: false
+      connectTimeoutSeconds: 8
+      # 逗号/换行分隔；为空则使用内置 DEFAULT_BOOTSTRAP
+      addrs: ""

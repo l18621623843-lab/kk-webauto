@@ -1,0 +1,54 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.kk</groupId>
+        <artifactId>kk-platform</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>kk-tunnel-vpn-p2p</artifactId>
+    <packaging>jar</packaging>
+    <description>
+        负责驱动加载、虚拟网卡 IP 分配、流量拦截路由
+        P2P 模块：Netty UDP、STUN/DHT 打洞逻辑
+    </description>
+
+    <properties>
+        <jna.version>5.13.0</jna.version>
+        <libp2p.version>1.2.2-RELEASE</libp2p.version>
+        <kotlin.version>1.9.20</kotlin.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>com.kk</groupId>
+            <artifactId>kk-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.libp2p</groupId>
+            <artifactId>jvm-libp2p</artifactId>
+            <version>${libp2p.version}</version>
+        </dependency>
+        <!-- Kotlin 标准库（libp2p 需要） -->
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-stdlib</artifactId>
+            <version>${kotlin.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains</groupId>
+            <artifactId>annotations</artifactId>
+            <version>24.0.1</version>
+        </dependency>
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna</artifactId>
+            <version>${jna.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna-platform</artifactId>
+            <version>${jna.version}</version>
+        </dependency>
+    </dependencies>
+</project>

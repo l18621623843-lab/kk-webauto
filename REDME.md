@@ -43,7 +43,7 @@ Write-Host "步骤 3/3: 安装 Chromium 浏览器..." -ForegroundColor Yellow
 Write-Host "这可能需要几分钟，请耐心等待..." -ForegroundColor Gray
 Write-Host ""
 
-Set-Location "kk-webauto-playwright"
+Set-Location "kk-playwright"
 
 # 创建临时安装器
 $installerCode = @"
@@ -81,6 +81,6 @@ Write-Host ""
 Write-Host "浏览器安装位置: $env:USERPROFILE\AppData\Local\ms-playwright" -ForegroundColor Gray
 Write-Host ""
 Write-Host "现在可以运行应用了:" -ForegroundColor Yellow
-Write-Host "  cd kk-webauto-app" -ForegroundColor White
+Write-Host "  cd kk-app" -ForegroundColor White
 Write-Host "  mvn spring-boot:run" -ForegroundColor White
 Write-Host ""

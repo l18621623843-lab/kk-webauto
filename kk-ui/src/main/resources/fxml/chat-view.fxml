@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.kk.ui.controller.ChatController"
+            prefHeight="650.0" prefWidth="900.0">
+
+    <top>
+        <VBox spacing="8">
+            <padding>
+                <Insets top="10" right="10" bottom="10" left="10"/>
+            </padding>
+
+            <GridPane hgap="10" vgap="8">
+                <columnConstraints>
+                    <ColumnConstraints percentWidth="18"/>
+                    <ColumnConstraints percentWidth="62"/>
+                    <ColumnConstraints percentWidth="20"/>
+                </columnConstraints>
+
+                <Label text="本机 PeerID:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                <TextField fx:id="selfPeerIdField" editable="false" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+                <Button text="复制" onAction="#handleCopySelfPeerId" GridPane.rowIndex="0" GridPane.columnIndex="2"/>
+
+                <Label text="对方 PeerID:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                <TextField fx:id="remotePeerIdField" promptText="输入对方 PeerID" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+                <Button text="连接" onAction="#handleConnect" GridPane.rowIndex="1" GridPane.columnIndex="2"/>
+
+                <Label text="对方地址:" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+                <TextField fx:id="remoteMultiaddrField" promptText="可选：/ip4/.../tcp/.../p2p/..." GridPane.rowIndex="2" GridPane.columnIndex="1"/>
+                <Label fx:id="statusLabel" text="未连接" GridPane.rowIndex="2" GridPane.columnIndex="2"/>
+
+                <Label text="连接方式:" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
+                <ComboBox fx:id="connectModeCombo" GridPane.rowIndex="3" GridPane.columnIndex="1" maxWidth="Infinity"/>
+                <Button text="Bootstrap" onAction="#handleBootstrapNow" GridPane.rowIndex="3" GridPane.columnIndex="2"/>
+
+                <Label text="Bootstrap状态:" GridPane.rowIndex="4" GridPane.columnIndex="0"/>
+                <Label fx:id="bootstrapStatusLabel" text="-" GridPane.rowIndex="4" GridPane.columnIndex="1"/>
+                <Button text="刷新" onAction="#handleRefreshBootstrap" GridPane.rowIndex="4" GridPane.columnIndex="2"/>
+
+                <Label text="公网(Google):" GridPane.rowIndex="5" GridPane.columnIndex="0"/>
+                <Label fx:id="googleStatusLabel" text="未检测" GridPane.rowIndex="5" GridPane.columnIndex="1"/>
+                <Button text="检测" onAction="#handleCheckGoogle" GridPane.rowIndex="5" GridPane.columnIndex="2"/>
+
+                <Label text="VPN 流量:" GridPane.rowIndex="6" GridPane.columnIndex="0"/>
+                <Label fx:id="vpnTrafficLabel" text="-" GridPane.rowIndex="6" GridPane.columnIndex="1"/>
+                <Button text="刷新" onAction="#handleRefreshTraffic" GridPane.rowIndex="6" GridPane.columnIndex="2"/>
+            </GridPane>
+        </VBox>
+    </top>
+
+    <center>
+        <VBox spacing="8">
+            <padding>
+                <Insets top="0" right="10" bottom="10" left="10"/>
+            </padding>
+            <TextArea fx:id="chatHistoryArea" wrapText="true"
+                      style="-fx-font-family: 'Consolas', 'Monaco', monospace;"
+                      VBox.vgrow="ALWAYS"/>
+        </VBox>
+    </center>
+
+    <bottom>
+        <HBox spacing="10" alignment="CENTER_LEFT">
+            <padding>
+                <Insets top="10" right="10" bottom="10" left="10"/>
+            </padding>
+            <TextField fx:id="messageInputField" promptText="输入消息，回车发送" onAction="#handleSend" HBox.hgrow="ALWAYS"/>
+            <Button text="发送" onAction="#handleSend"/>
+        </HBox>
+    </bottom>
+
+</BorderPane>
