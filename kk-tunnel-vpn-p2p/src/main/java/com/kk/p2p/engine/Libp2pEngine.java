@@ -1,5 +1,6 @@
 package com.kk.p2p.engine;
 
+import cn.hutool.extra.spring.SpringUtil;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
@@ -91,6 +92,14 @@ public class Libp2pEngine {
     private static final long ADDR_TTL_MS = TimeUnit.HOURS.toMillis(6);
     private static final int MAX_FRAME_SIZE = Integer.getInteger("kk.p2p.maxFrameSize", 1024 * 1024);
 
+    /**
+     * libp2p TCP 监听端口。
+     * - 0 表示随机端口（适合临时测试）
+     * - 建议 relay(HOP) 节点固定端口，便于其他节点拨号
+     */
+    @Value("${kk.p2p.listenPort:0}")
+    private int listenPort;
+
     // -------------------- 拨号策略（直连优先，失败再尝试 /p2p-circuit） --------------------
 
     /**
@@ -119,9 +128,21 @@ public class Libp2pEngine {
     @Value("${kk.p2p.dial.triggerRelayReserveOnFail:true}")
     private boolean dialTriggerRelayReserveOnFail;
 
-    private static final Path IDENTITY_KEY_PATH = Path.of(
+    private static final Path DEFAULT_IDENTITY_KEY_PATH = Path.of(
             System.getProperty("user.home"), ".kk-platform", "p2p", "identity.key"
     );
+
+    /**
+     * 节点私钥文件路径（用于稳定 PeerID）。
+     *
+     * 说明：
+     * - 不配置时，默认使用 ~/.kk-platform/p2p/identity.key
+     * - 可在本地同时启动多个节点时，给不同进程配置不同 keyPath，避免 PeerID 冲突。
+     *
+     * 也支持 JVM 参数覆盖：-Dkk.p2p.identityKeyPath=...
+     */
+    @Value("${kk.p2p.identity.keyPath:}")
+    private String identityKeyPath;
 
     // 默认的公网 bootstrap（注意：这些节点通常不支持你的自定义 PEX 协议，仅用于保持公网连接/辅助 NAT 识别/后续扩展）
     private static final List<String> DEFAULT_BOOTSTRAP = List.of(
@@ -188,8 +209,15 @@ public class Libp2pEngine {
 
     private final ConcurrentHashMap<String, RelayReservation> relayReservations = new ConcurrentHashMap<>();
 
+    // relay TCP 已连（仅用于 UI 展示“是否已连上 relay”；不等同于“已预约成功”）
+    private final ConcurrentHashMap<String, Long> relayConnectedAtMs = new ConcurrentHashMap<>();
+
+    // 预约中的任务去重（避免用户重复点击/重复输入导致并发预约）
+    private final ConcurrentHashMap<String, CompletableFuture<Void>> relayReserveInflight = new ConcurrentHashMap<>();
+
     // 避免每次拨号失败都触发 relay 预约（只触发一次）
     private final AtomicBoolean relayReserveTriggered = new AtomicBoolean(false);
+
 
     private static final class RelayReservation {
         final Multiaddr relayAddr; // must include /p2p/relayId
@@ -202,6 +230,40 @@ public class Libp2pEngine {
             this.expiryEpochSeconds = expiryEpochSeconds;
         }
     }
+
+    private static final class LoggingRelayManager implements CircuitHopProtocol.RelayManager {
+        private final CircuitHopProtocol.RelayManager delegate;
+
+        private LoggingRelayManager(CircuitHopProtocol.RelayManager delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public boolean hasReservation(PeerId source) {
+            return delegate.hasReservation(source);
+        }
+
+        @Override
+        public java.util.Optional<CircuitHopProtocol.Reservation> createReservation(PeerId requestor, Multiaddr addr) {
+            java.util.Optional<CircuitHopProtocol.Reservation> r = delegate.createReservation(requestor, addr);
+            try {
+                log.info("Relay(HOP): reserve 请求 from={} addr={} => {}", (requestor == null ? "-" : requestor.toBase58()), (addr == null ? "-" : addr.toString()), (r.isPresent() ? "ACCEPT" : "REJECT"));
+            } catch (Exception ignore) {
+            }
+            return r;
+        }
+
+        @Override
+        public java.util.Optional<CircuitHopProtocol.Reservation> allowConnection(PeerId target, PeerId initiator) {
+            java.util.Optional<CircuitHopProtocol.Reservation> r = delegate.allowConnection(target, initiator);
+            try {
+                log.info("Relay(HOP): hop 转发请求 target={} initiator={} => {}", (target == null ? "-" : target.toBase58()), (initiator == null ? "-" : initiator.toBase58()), (r.isPresent() ? "ALLOW" : "DENY"));
+            } catch (Exception ignore) {
+            }
+            return r;
+        }
+    }
+
 
     // -------------------- 发现机制（mDNS：局域网自动发现） --------------------
 
@@ -355,7 +417,6 @@ public class Libp2pEngine {
             PrivKey privKey = loadOrCreatePrivKey();
             selfPeerId = PeerId.fromPubKey(privKey.publicKey());
 
-            int listenPort = Integer.getInteger("kk.p2p.listenPort", 0);
 
             String relayModeNorm = relayMode == null ? "CLIENT" : relayMode.trim().toUpperCase();
             boolean hopMode = "HOP".equals(relayModeNorm);
@@ -364,7 +425,7 @@ public class Libp2pEngine {
 
             CircuitHopProtocol.RelayManager relayManager;
             if (hopMode) {
-                relayManager = CircuitHopProtocol.RelayManager.limitTo(privKey, selfPeerId, relayHopConcurrent);
+                relayManager = new LoggingRelayManager(CircuitHopProtocol.RelayManager.limitTo(privKey, selfPeerId, relayHopConcurrent));
                 log.info("Relay 模式: HOP（本节点将作为 relay 服务端，允许预约/转发连接）");
             } else {
                 relayManager = new CircuitHopProtocol.RelayManager() {
@@ -386,26 +447,31 @@ public class Libp2pEngine {
                 log.info("Relay 模式: CLIENT（本节点仅使用 relay，不对外提供 hop）");
             }
 
+
             circuitHopBinding = new CircuitHopProtocol.Binding(relayManager, circuitStopBinding);
 
-            host = new HostBuilder()
-                    .transport(
-                            TcpTransport::new,
-                            upgrader -> {
-                                relayTransport = new RelayTransport(
-                                        circuitHopBinding,
-                                        circuitStopBinding,
-                                        upgrader,
-                                        h -> List.of(),
-                                        relayScheduler
-                                );
-                                // 禁用 RelayTransport 自带的自动选 relay/预约逻辑（该版本实现不完整），由本引擎手动控制预约。
-                                relayTransport.setRelayCount(0);
-                                return relayTransport;
-                            }
-                    )
+            HostBuilder hb = new HostBuilder()
+                    .transport(TcpTransport::new);
 
-                    .protocol(
+            // 注意：在 jvm-libp2p 1.2.x 中，即使是 HOP 节点，也需要挂载 RelayTransport 才能正确处理 /p2p-circuit 的转发链路。
+            // 这里关闭 RelayTransport 的“自动选择 relay”逻辑（relayCount=0），仅作为 circuit 传输实现使用。
+            if (relayEnabled) {
+                hb = hb.transport(upgrader -> {
+                    relayTransport = new RelayTransport(
+                            circuitHopBinding,
+                            circuitStopBinding,
+                            upgrader,
+                            h -> List.of(),
+                            relayScheduler
+                    );
+                    relayTransport.setRelayCount(0);
+                    return relayTransport;
+                });
+            } else {
+                relayTransport = null;
+            }
+
+            host = hb.protocol(
                             new Ping(),
                             new Identify(),
                             circuitStopBinding,
@@ -419,8 +485,14 @@ public class Libp2pEngine {
                     .builderModifier(builder -> builder.getIdentity().setFactory(() -> privKey))
                     .build();
 
+            // 关键：jvm-libp2p 1.2.x 某些场景不会自动把 Host 注入到 circuit 相关组件里，需要手动绑定。
+            bindCircuitComponents();
+
             host.start().get();
             running.set(true);
+
+            // 启动后再兜底一次（不同版本的绑定时机可能不同）
+            bindCircuitComponents();
 
             // WebRTC 数据面（DataChannel + ICE/STUN/TURN）
             if (webrtcEnabled) {
@@ -483,6 +555,51 @@ public class Libp2pEngine {
             throw new RuntimeException("Failed to start Libp2p engine", e);
         }
     }
+
+    private void bindCircuitComponents() {
+        Host h = host;
+        if (h == null) {
+            return;
+        }
+
+        // CircuitHopProtocol.Binding 实现了 HostConsumer，必须 setHost 才能处理 reserve/hop。
+        if (circuitHopBinding != null) {
+            try {
+                circuitHopBinding.setHost(h);
+            } catch (Exception e) {
+                log.debug("circuitHopBinding.setHost 失败: {}", e.toString());
+            }
+        }
+
+        RelayTransport rt = relayTransport;
+        if (rt != null) {
+            try {
+                rt.setHost(h);
+            } catch (Exception e) {
+                log.debug("relayTransport.setHost 失败: {}", e.toString());
+            }
+        }
+
+        // CircuitStopProtocol.Binding 需要绑定 transport
+        if (circuitStopBinding != null && rt != null) {
+            try {
+                circuitStopBinding.setTransport(rt);
+            } catch (Exception e) {
+                log.debug("circuitStopBinding.setTransport 失败: {}", e.toString());
+            }
+        }
+
+        // 初始化 RelayTransport（建立内部监听/清理任务等）
+        if (rt != null) {
+            try {
+                rt.initialize();
+            } catch (Exception e) {
+                log.debug("relayTransport.initialize 失败: {}", e.toString());
+            }
+        }
+    }
+
+
 
     /**
      * 连接 bootstrap 节点（仅用于辅助保持公网连通性/Identify 交换；自定义 PEX 协议多数公用节点不会支持）
@@ -573,6 +690,11 @@ public class Libp2pEngine {
     public int getRelayReserved() {
         return relayReserved.get();
     }
+
+    public int getRelayConnected() {
+        return relayConnectedAtMs.size();
+    }
+
 
     public String getLastRelayError() {
         return lastRelayError;
@@ -1217,6 +1339,9 @@ public class Libp2pEngine {
         if (relayPeerIdStr == null || relayPeerIdStr.isBlank()) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("relay multiaddr missing /p2p/<peerId>"));
         }
+        if (selfPeerId != null && relayPeerIdStr.equals(selfPeerId.toBase58())) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("relay peerId equals self; please use a different identity key for hop/client"));
+        }
 
         final PeerId relayPeerId;
         try {
@@ -1225,25 +1350,65 @@ public class Libp2pEngine {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid relay peerId", e));
         }
 
-        relayAttempted.incrementAndGet();
+        final String relayPeerKey = relayPeerId.toBase58();
 
-        return host.getNetwork().connect(relayPeerId, addr)
+        // 1) 已有有效预约：直接返回（避免重复点击导致 attempted 不断增长）
+        RelayReservation existing = relayReservations.get(relayPeerKey);
+        long nowEpoch = System.currentTimeMillis() / 1000;
+        if (existing != null && existing.expiryEpochSeconds > (nowEpoch + 120)) {
+            log.info("relay 已存在有效预约，跳过: {} (expiryEpoch={})", relayMultiaddr, existing.expiryEpochSeconds);
+            return CompletableFuture.completedFuture(null);
+        }
+
+        // 2) 已有进行中的预约：复用同一个 Future
+        CompletableFuture<Void> inflight = relayReserveInflight.get(relayPeerKey);
+        if (inflight != null && !inflight.isDone()) {
+            log.info("relay 预约进行中，跳过重复触发: {}", relayMultiaddr);
+            return inflight;
+        }
+
+        relayAttempted.incrementAndGet();
+        log.info("开始预约 relay: {}", relayMultiaddr);
+
+        CompletableFuture<Void> f = host.getNetwork().connect(relayPeerId, addr)
                 .orTimeout(relayConnectTimeoutSeconds, TimeUnit.SECONDS)
-                .thenCompose(conn -> conn.muxerSession().createStream(circuitHopBinding).getController())
-                .thenCompose(ctrl -> ctrl.reserve().thenAccept(res -> {
-                    long expiryEpoch = 0L;
-                    try {
-                        expiryEpoch = res.expiry.toEpochSecond(java.time.ZoneOffset.UTC);
-                    } catch (Exception ignore) {
-                    }
-                    relayReservations.put(relayPeerId.toBase58(), new RelayReservation(addr, ctrl, expiryEpoch));
-                    relayReserved.set(relayReservations.size());
-                }))
+                .thenCompose(conn -> {
+                    relayConnectedAtMs.put(relayPeerKey, System.currentTimeMillis());
+                    log.info("已连接 relay: {} (peerId={})", relayMultiaddr, relayPeerKey);
+
+                    // createStream / reserve 如果不加超时，会出现“已连接但无后续日志”的假死现象
+                    return conn.muxerSession()
+                            .createStream(circuitHopBinding)
+                            .getController()
+                            .orTimeout(relayConnectTimeoutSeconds, TimeUnit.SECONDS);
+                })
+                .thenCompose(ctrl -> ctrl.reserve()
+                        .orTimeout(relayConnectTimeoutSeconds, TimeUnit.SECONDS)
+                        .thenAccept(res -> {
+                            long expiryEpoch = 0L;
+                            try {
+                                expiryEpoch = res.expiry.toEpochSecond(java.time.ZoneOffset.UTC);
+                            } catch (Exception ignore) {
+                            }
+
+                            relayReservations.put(relayPeerKey, new RelayReservation(addr, ctrl, expiryEpoch));
+                            relayReserved.set(relayReservations.size());
+
+                            String circuitAddr = toCircuitAddr(addr.toString(), selfPeerId == null ? "" : selfPeerId.toBase58());
+                            log.info("relay 预约成功: relayPeerId={} expiryEpoch={} circuitAddr={}", relayPeerKey, expiryEpoch, circuitAddr);
+                        }))
+                .whenComplete((v, ex) -> relayReserveInflight.remove(relayPeerKey))
                 .exceptionally(ex -> {
-                    lastRelayError = (ex == null ? "unknown" : (ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage()));
-                    log.debug("relay 预约失败: {}", relayMultiaddr, ex);
+                    lastRelayError = summarize(ex);
+                    log.warn("relay 预约失败: {} ({})", relayMultiaddr, lastRelayError);
+                    log.debug("relay 预约失败堆栈: {}", relayMultiaddr, ex);
                     throw new RuntimeException(ex);
                 });
+
+        relayReserveInflight.put(relayPeerKey, f);
+        return f;
+
+
     }
 
     private List<String> resolveRelayAddrs() {
@@ -1331,9 +1496,12 @@ public class Libp2pEngine {
     }
 
     private PrivKey loadOrCreatePrivKey() {
+        Path keyPath = resolveIdentityKeyPath();
         try {
-            if (Files.exists(IDENTITY_KEY_PATH)) {
-                byte[] bytes = Files.readAllBytes(IDENTITY_KEY_PATH);
+            log.info("节点身份文件: {}", keyPath.toAbsolutePath());
+
+            if (Files.exists(keyPath)) {
+                byte[] bytes = Files.readAllBytes(keyPath);
                 if (bytes.length > 0) {
                     return KeyKt.unmarshalPrivateKey(bytes);
                 }
@@ -1342,16 +1510,50 @@ public class Libp2pEngine {
             Pair<PrivKey, ?> keyPair = KeyKt.generateKeyPair(KeyType.ED25519);
             PrivKey privKey = keyPair.getFirst();
 
-            Files.createDirectories(IDENTITY_KEY_PATH.getParent());
-            Path tmp = IDENTITY_KEY_PATH.resolveSibling(IDENTITY_KEY_PATH.getFileName() + ".tmp");
+            Path parent = keyPath.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+
+            Path tmp = keyPath.resolveSibling(keyPath.getFileName() + ".tmp");
             Files.write(tmp, KeyKt.marshalPrivateKey(privKey));
-            Files.move(tmp, IDENTITY_KEY_PATH, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            Files.move(tmp, keyPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             return privKey;
         } catch (Exception e) {
             log.warn("加载/保存节点私钥失败，将使用临时身份（PeerId 将变化）", e);
             Pair<PrivKey, ?> keyPair = KeyKt.generateKeyPair(KeyType.ED25519);
             return keyPair.getFirst();
         }
+    }
+
+    private Path resolveIdentityKeyPath() {
+        String sys = System.getProperty("kk.p2p.identityKeyPath");
+        String s = (sys == null || sys.isBlank()) ? identityKeyPath : sys;
+
+        if (s == null || s.isBlank()) {
+            return DEFAULT_IDENTITY_KEY_PATH;
+        }
+
+        String v = expandHomePath(s.trim());
+        try {
+            return Path.of(v);
+        } catch (Exception e) {
+            return DEFAULT_IDENTITY_KEY_PATH;
+        }
+    }
+
+    private static String expandHomePath(String path) {
+        if (path == null) {
+            return null;
+        }
+        String p = path.trim();
+        if (p.equals("~")) {
+            return System.getProperty("user.home");
+        }
+        if (p.startsWith("~/") || p.startsWith("~\\")) {
+            return System.getProperty("user.home") + p.substring(1);
+        }
+        return p;
     }
 
     private ProtocolBinding<VpnController> createVpnProtocolBinding() {

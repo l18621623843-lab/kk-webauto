@@ -72,6 +72,16 @@ vpn:
 # - WebRTC DataChannel 作为优先数据面（UDP）：成功则 Chat/VPN 优先走 UDP，失败自动回落到 libp2p(TCP/Relay)。
 kk:
   p2p:
+    identity:
+      # 节点私钥文件路径（用于稳定 PeerID）。
+      # - 不配置时默认使用：~/.kk-platform/p2p/identity.key
+      # - 本机同时运行 hop + client 时必须设置不同 keyPath（否则两边 PeerID 一样，会导致 relay/连接逻辑异常）
+      # - 也可用 JVM 参数覆盖：-Dkk.p2p.identityKeyPath=...
+      keyPath: ""
+
+    # libp2p TCP 监听端口（relay(HOP) 建议固定；0 表示随机端口）
+    listenPort: 4001
+
     dial:
       # 单个 multiaddr 的拨号超时（毫秒）
       perAddrTimeoutMs: 2500
@@ -97,7 +107,7 @@ kk:
 
     relay:
       # 是否启用 Relay v2（/p2p-circuit）作为内网穿透/兜底链路
-      enabled: false
+      enabled: true
 
       # Relay 模式：
       # - CLIENT：只作为客户端使用 relay（向 relay 预约并生成 /p2p-circuit 地址）
@@ -109,7 +119,7 @@ kk:
 
       # relay 节点地址列表（逗号/换行分隔），每个必须包含 /p2p/<relayPeerId>
       # 示例：/ip4/1.2.3.4/tcp/4001/p2p/12D3KooW...
-      addrs: ""
+      addrs: "/ip4/47.115.219.83/tcp/4001/p2p/12D3KooWLUtam7Gwps8FF6NKcy2pnFcBogdW2eD2oUE4AnpLRrZ5"
 
       hop:
         # HOP 模式下允许并发预约/转发的上限（保护本机资源）

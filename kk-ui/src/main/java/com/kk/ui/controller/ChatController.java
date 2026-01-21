@@ -307,10 +307,14 @@ public class ChatController extends BaseController {
     private void refreshRelayStatus(boolean writeLog) {
         boolean enabled = libp2pEngine.isRelayEnabled();
         int attempted = libp2pEngine.getRelayAttempted();
+        int connected = libp2pEngine.getRelayConnected();
         int reserved = libp2pEngine.getRelayReserved();
         String lastErr = libp2pEngine.getLastRelayError();
 
-        String text = (enabled ? "启用" : "禁用") + " | 已预约 " + reserved + "/" + attempted + (lastErr == null || lastErr.isBlank() ? "" : (" | 最近错误: " + lastErr));
+        String text = (enabled ? "启用" : "禁用")
+                + " | 已连 " + connected
+                + " | 已预约 " + reserved + "/" + attempted
+                + (lastErr == null || lastErr.isBlank() ? "" : (" | 最近错误: " + lastErr));
 
         List<String> relayAddrs = libp2pEngine.getRelayShareAddrs();
         String relayAddrText = relayAddrs.isEmpty() ? "-" : String.join("\n", relayAddrs);
@@ -327,6 +331,7 @@ public class ChatController extends BaseController {
             }
         });
     }
+
 
     @FXML
     private void handleCopyRelayAddrs() {
