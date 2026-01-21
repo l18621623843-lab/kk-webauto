@@ -1,0 +1,6 @@
+Compiled from "CircuitStopProtocol.java"
+public class io.libp2p.protocol.circuit.CircuitStopProtocol$Binding extends io.libp2p.core.multistream.StrictProtocolBinding<io.libp2p.protocol.circuit.CircuitStopProtocol$StopController> {
+  private final io.libp2p.protocol.circuit.CircuitStopProtocol stop;
+  public io.libp2p.protocol.circuit.CircuitStopProtocol$Binding(io.libp2p.protocol.circuit.CircuitStopProtocol);
+  public void setTransport(io.libp2p.protocol.circuit.RelayTransport);
+}
