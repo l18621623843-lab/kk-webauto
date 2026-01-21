@@ -139,6 +139,11 @@
             <url>https://maven.aliyun.com/nexus/content/groups/public</url>
         </repository>
         <repository>
+            <id>central</id>
+            <name>Maven Central</name>
+            <url>https://repo.maven.apache.org/maven2</url>
+        </repository>
+        <repository>
             <id>libp2p-jvm-libp2p</id>
             <url>https://dl.cloudsmith.io/public/libp2p/jvm-libp2p/maven/</url>
         </repository>

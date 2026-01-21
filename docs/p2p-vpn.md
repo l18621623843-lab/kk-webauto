@@ -45,7 +45,7 @@
 - 但如果两端都在严格 NAT 后且都不具备入站能力，则可能出现“谁也打不进来”。这种情况下需要：
   - UPnP/NAT-PMP 端口映射（推荐先试），或
   - 使用 relay 兜底（稳定方案），或
-  - 采用基于 UDP 的 ICE/打洞方案（见 8.4 说明）。
+  - 采用基于 UDP 的 WebRTC（ICE/STUN/TURN + DataChannel）打洞方案（见 8.4 说明）。
 
 ---
 
@@ -225,23 +225,24 @@ A：通常是以下原因：
 - `wintun.dll` 不可加载（路径不对）
 
 ### 8.4 现有代码是否实现“打洞(hole punching)”？
-- **已实现 ICE/STUN/TURN（UDP）数据面**：使用 `ice4j`，并通过 libp2p 自定义协议做信令交换。
+- **已实现 WebRTC（ICE/STUN/TURN + DataChannel）数据面**：使用 `dev.onvoid.webrtc:webrtc-java`。
 - 具体机制：
-  - 信令：`/kk-ice-signal/1.0.0`（通过 libp2p stream 交换 offer/answer/candidates）
-  - 数据面：ICE 建链成功后，Chat/VPN **优先走 ICE-UDP**；失败则自动回落到 **libp2p(TCP/Relay)**。
-- 重要限制：ICE 需要双方在线完成一次 offer/answer 交换。
-  - 这次交换可以走直连，也可以走 relay（如果只能靠 relay 才能先“互相看见”，ICE 仍可能随后打洞出一条 UDP 直连通道）。
+  - 信令：`/kk-webrtc-signal/1.0.0`（通过 libp2p stream 交换 `offer/answer/cand`）
+  - 数据面：WebRTC 建链成功后，Chat/VPN **优先走 WebRTC-UDP**；失败则自动回落到 **libp2p(TCP/Relay)**。
+- 重要限制：WebRTC 需要双方在线完成一次 offer/answer + candidate 交换。
+  - 这次交换可以走直连，也可以走 relay（如果只能靠 relay 才能先“互相看见”，WebRTC 仍可能随后打洞出一条 UDP 直连通道）。
 
-### 8.5 如何开启 ICE（推荐做法）
+### 8.5 如何开启 WebRTC（推荐做法）
 1) 两端都配置并启用：
 ```yml
 kk:
   p2p:
-    ice:
+    webrtc:
       enabled: true
       prefer:
         chat: true
         vpn: true
+      connectTimeoutMs: 12000
       stun:
         servers: "stun.l.google.com:19302,stun1.l.google.com:19302"
       # 有条件建议配置固定端口范围，方便放行防火墙
@@ -251,7 +252,7 @@ kk:
 ```
 2) 启动两端程序
 3) 先在 UI 里正常“连接”（确保双方能交换到地址/建立 libp2p stream）
-4) 之后发送消息/开启 VPN 时会自动尝试 ICE：
+4) 之后发送消息/开启 VPN 时会自动尝试 WebRTC：
    - 成功：后续数据优先走 UDP
    - 失败：自动回落到 TCP/Relay，不影响功能
 
@@ -261,7 +262,7 @@ kk:
 ```yml
 kk:
   p2p:
-    ice:
+    webrtc:
       turn:
         enabled: true
         servers: "turn.example.com:3478|username|password"
@@ -274,5 +275,6 @@ kk:
 
 - P2P 引擎：`kk-tunnel-vpn-p2p/src/main/java/com/kk/p2p/engine/Libp2pEngine.java`
 - NAT/UPnP：`kk-tunnel-vpn-p2p/src/main/java/com/kk/p2p/nat/UpnpIgdPortMapper.java`
+- WebRTC 会话：`kk-tunnel-vpn-p2p/src/main/java/com/kk/p2p/webrtc/WebRtcDataSession.java`
 - Wintun 虚拟网卡：`kk-tunnel-vpn-p2p/src/main/java/com/kk/tunnel/vpn/service/WintunService.java`
 - UI：`kk-ui/src/main/resources/fxml/chat-view.fxml` + `kk-ui/src/main/java/com/kk/ui/controller/ChatController.java`

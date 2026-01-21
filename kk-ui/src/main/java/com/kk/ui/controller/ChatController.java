@@ -63,6 +63,10 @@ public class ChatController extends BaseController {
     @FXML private Label mdnsStatusLabel;
     @FXML private Label stunStatusLabel;
 
+    @FXML private Label peerLinkModeLabel;
+    @FXML private Label iceStatusLabel;
+
+
 
     @FXML private TextArea chatHistoryArea;
     @FXML private TextField messageInputField;
@@ -115,11 +119,18 @@ public class ChatController extends BaseController {
         refreshRelayStatus(false);
         refreshMdnsStatus(false);
         refreshStunStatus(false);
+        refreshPeerRealtimeStatus(false);
 
+        // 地址列表变化不频繁，5s 刷新即可
         scheduler.scheduleAtFixedRate(() -> refreshShareAddrs(false), 2, 5, TimeUnit.SECONDS);
-        scheduler.scheduleAtFixedRate(() -> refreshRelayStatus(false), 2, 5, TimeUnit.SECONDS);
-        scheduler.scheduleAtFixedRate(() -> refreshMdnsStatus(false), 2, 5, TimeUnit.SECONDS);
-        scheduler.scheduleAtFixedRate(() -> refreshStunStatus(false), 2, 5, TimeUnit.SECONDS);
+
+        // 状态值：1s 主动刷新（替代“刷新”按钮）
+        scheduler.scheduleAtFixedRate(() -> refreshRelayStatus(false), 1, 1, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> refreshMdnsStatus(false), 1, 1, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> refreshStunStatus(false), 1, 1, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> refreshBootstrapStatus(false), 1, 1, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> refreshPeerRealtimeStatus(false), 1, 1, TimeUnit.SECONDS);
+
 
 
         // 启动后自动检测一次，并定时刷新状态
@@ -140,7 +151,6 @@ public class ChatController extends BaseController {
         initSettingsPanel();
         scheduler.scheduleAtFixedRate(() -> refreshVpnStatus(false), 1, 1, TimeUnit.SECONDS);
 
-        scheduler.scheduleAtFixedRate(() -> refreshBootstrapStatus(false), 2, 5, TimeUnit.SECONDS);
     }
 
     private void refreshSelfPeerId() {
@@ -478,6 +488,89 @@ public class ChatController extends BaseController {
         }));
     }
 
+    private void refreshPeerRealtimeStatus(boolean writeLog) {
+        String peerId = currentRemotePeerId;
+        if (peerId == null || peerId.isBlank()) {
+            peerId = remotePeerIdField == null ? null : remotePeerIdField.getText();
+        }
+
+        Libp2pEngine.PeerRealtimeStatus st = libp2pEngine.getPeerRealtimeStatus(peerId);
+
+        String linkText = st.linkMode();
+        String remote = st.remoteAddr();
+        if (remote != null && !remote.isBlank() && !"-".equals(remote)) {
+            linkText = linkText + " | " + shorten(remote, 96);
+        }
+
+        String iceText = st.iceState();
+        String detail = st.iceDetail();
+        if (detail != null && !detail.isBlank() && !"-".equals(detail)) {
+            iceText = iceText + " | " + shorten(detail, 96);
+        }
+
+        String finalLinkText = linkText;
+        String finalIceText = iceText;
+        runOnUIThread(() -> {
+            if (peerLinkModeLabel != null) {
+                peerLinkModeLabel.setText(finalLinkText);
+                setStatusStyle(peerLinkModeLabel, st.linkMode());
+            }
+            if (iceStatusLabel != null) {
+                iceStatusLabel.setText(finalIceText);
+                setIceStyle(iceStatusLabel, st.iceState());
+            }
+            if (writeLog) {
+                appendLog(chatHistoryArea, "对端状态: " + st.peerId() + " | " + finalLinkText + " | ICE=" + finalIceText);
+            }
+        });
+    }
+
+    private static String shorten(String s, int max) {
+        if (s == null) {
+            return "-";
+        }
+        String v = s.trim();
+        if (v.length() <= max) {
+            return v;
+        }
+        return v.substring(0, Math.max(0, max - 3)) + "...";
+    }
+
+    private static void setStatusStyle(Label label, String linkMode) {
+        if (label == null) {
+            return;
+        }
+        String m = linkMode == null ? "" : linkMode;
+        if (m.startsWith("中继")) {
+            label.setStyle("-fx-text-fill: #6d4c41; -fx-font-weight: bold;");
+        } else if (m.startsWith("内网")) {
+            label.setStyle("-fx-text-fill: #1565c0; -fx-font-weight: bold;");
+        } else if (m.startsWith("直连")) {
+            label.setStyle("-fx-text-fill: #2e7d32; -fx-font-weight: bold;");
+        } else {
+            label.setStyle("");
+        }
+    }
+
+    private static void setIceStyle(Label label, String iceState) {
+        if (label == null) {
+            return;
+        }
+        String s = iceState == null ? "" : iceState;
+        if (s.startsWith("已建立")) {
+            label.setStyle("-fx-text-fill: #2e7d32; -fx-font-weight: bold;");
+        } else if (s.startsWith("协商")) {
+            label.setStyle("-fx-text-fill: #ef6c00; -fx-font-weight: bold;");
+        } else if (s.startsWith("失败")) {
+            label.setStyle("-fx-text-fill: #c62828; -fx-font-weight: bold;");
+        } else if (s.startsWith("禁用")) {
+            label.setStyle("-fx-text-fill: #616161;");
+        } else {
+            label.setStyle("");
+        }
+    }
+
+
     private CompletableFuture<String> probeGoogleAny(int idx, String lastFailText) {
         if (idx >= GOOGLE_PROBES.length) {
             return CompletableFuture.completedFuture(lastFailText == null ? "不可用" : lastFailText);
@@ -750,18 +843,17 @@ public class ChatController extends BaseController {
                 "# UPnP 是端口映射：路由器支持且开启时，能显著提高‘对端直连你’的概率。" + "\n\n" +
                 "kk.p2p.nat.stun.enabled: false" + "\n" +
                 "# STUN 仅用于探测公网 UDP 映射（帮助判断网络环境），不保证 TCP 直连。" + "\n\n" +
-                "# ========== ICE/STUN/TURN（UDP 打洞数据面） ==========" + "\n" +
-                "kk.p2p.ice.enabled: true" + "\n" +
-                "kk.p2p.ice.prefer.chat: true" + "\n" +
-                "kk.p2p.ice.prefer.vpn: true" + "\n" +
-                "kk.p2p.ice.gatherTimeoutMs: 2500" + "\n" +
-                "kk.p2p.ice.connectTimeoutMs: 9000" + "\n" +
-                "kk.p2p.ice.port.min: 0" + "\n" +
-                "kk.p2p.ice.port.max: 0" + "\n" +
-                "kk.p2p.ice.stun.servers: \"stun.l.google.com:19302\"" + "\n" +
-                "kk.p2p.ice.turn.enabled: false" + "\n" +
-                "kk.p2p.ice.turn.servers: \"turn.example.com:3478|user|pass\"" + "\n" +
-                "# ICE 需要双方在线交换 offer/answer；成功后 Chat/VPN 会优先走 UDP（更像‘打洞直连’）。" + "\n\n" +
+                "# ========== WebRTC（UDP 打洞数据面：ICE/STUN/TURN + DataChannel） ==========" + "\n" +
+                "kk.p2p.webrtc.enabled: true" + "\n" +
+                "kk.p2p.webrtc.prefer.chat: true" + "\n" +
+                "kk.p2p.webrtc.prefer.vpn: true" + "\n" +
+                "kk.p2p.webrtc.connectTimeoutMs: 12000" + "\n" +
+                "kk.p2p.webrtc.port.min: 0" + "\n" +
+                "kk.p2p.webrtc.port.max: 0" + "\n" +
+                "kk.p2p.webrtc.stun.servers: \"stun.l.google.com:19302\"" + "\n" +
+                "kk.p2p.webrtc.turn.enabled: false" + "\n" +
+                "kk.p2p.webrtc.turn.servers: \"turn.example.com:3478|user|pass\"" + "\n" +
+                "# WebRTC 需要双方在线交换 offer/answer/candidates；成功后 Chat/VPN 会优先走 UDP，失败自动回落 TCP/Relay。" + "\n\n" +
                 "# ========== 虚拟 VPN（Windows/Wintun） ==========" + "\n" +
                 "vpn.enabled: false" + "\n" +
                 "vpn.ip.address: 10.8.0.3" + "\n" +

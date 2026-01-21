@@ -3,7 +3,7 @@ package com.kk.p2p.engine;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import com.kk.p2p.ice.IceUdpSession;
+import com.kk.p2p.webrtc.WebRtcDataSession;
 import com.kk.p2p.nat.UpnpIgdPortMapper;
 import com.kk.tunnel.vpn.service.WintunService;
 import io.libp2p.core.Connection;
@@ -86,7 +86,7 @@ public class Libp2pEngine {
     private static final String VPN_PROTOCOL_ID = "/kk-vpn/1.0.0";
     private static final String PEX_PROTOCOL_ID = "/kk/pex/1.0.0";
     private static final String CHAT_PROTOCOL_ID = "/kk-chat/1.0.0";
-    private static final String ICE_SIGNAL_PROTOCOL_ID = "/kk-ice-signal/1.0.0";
+    private static final String WEBRTC_SIGNAL_PROTOCOL_ID = "/kk-webrtc-signal/1.0.0";
 
     private static final long ADDR_TTL_MS = TimeUnit.HOURS.toMillis(6);
     private static final int MAX_FRAME_SIZE = Integer.getInteger("kk.p2p.maxFrameSize", 1024 * 1024);
@@ -217,6 +217,8 @@ public class Libp2pEngine {
     private volatile MDnsDiscovery mdnsDiscovery;
     private final AtomicInteger mdnsPeersFound = new AtomicInteger(0);
     private volatile String lastMdnsPeer;
+    private final ConcurrentHashMap<String, Long> mdnsSeenAtMs = new ConcurrentHashMap<>();
+
 
     // -------------------- NAT 端口映射（UPnP IGD：提高公网直连成功率） --------------------
 
@@ -260,54 +262,48 @@ public class Libp2pEngine {
 
     private final SecureRandom stunRandom = new SecureRandom();
 
-    // -------------------- ICE/STUN/TURN（UDP 打洞数据面，失败回落 TCP/Relay） --------------------
+    // -------------------- WebRTC（DataChannel + ICE/STUN/TURN：UDP 数据面，失败回落 TCP/Relay） --------------------
 
-    @Value("${kk.p2p.ice.enabled:false}")
-    private boolean iceEnabled;
+    @Value("${kk.p2p.webrtc.enabled:true}")
+    private boolean webrtcEnabled;
 
-    @Value("${kk.p2p.ice.prefer.chat:true}")
-    private boolean icePreferChat;
+    @Value("${kk.p2p.webrtc.prefer.chat:true}")
+    private boolean webrtcPreferChat;
 
-    @Value("${kk.p2p.ice.prefer.vpn:true}")
-    private boolean icePreferVpn;
-
-    /**
-     * 候选采集等待时间（毫秒）：越大越容易收集到 srflx/relay 候选，但首次发送更慢。
-     */
-    @Value("${kk.p2p.ice.gatherTimeoutMs:2500}")
-    private long iceGatherTimeoutMs;
+    @Value("${kk.p2p.webrtc.prefer.vpn:true}")
+    private boolean webrtcPreferVpn;
 
     /**
-     * ICE 连接建立总超时（毫秒）。
+     * WebRTC 建链总超时（毫秒）。
      */
-    @Value("${kk.p2p.ice.connectTimeoutMs:9000}")
-    private long iceConnectTimeoutMs;
+    @Value("${kk.p2p.webrtc.connectTimeoutMs:12000}")
+    private long webrtcConnectTimeoutMs;
 
     /**
-     * ICE 本地 UDP 端口范围（0 表示由系统分配）。
+     * WebRTC 本地 UDP 端口范围（0 表示由系统分配）。
      */
-    @Value("${kk.p2p.ice.port.min:0}")
-    private int icePortMin;
+    @Value("${kk.p2p.webrtc.port.min:0}")
+    private int webrtcPortMin;
 
-    @Value("${kk.p2p.ice.port.max:0}")
-    private int icePortMax;
+    @Value("${kk.p2p.webrtc.port.max:0}")
+    private int webrtcPortMax;
 
     /**
      * STUN 服务器（逗号/换行分隔），形如：stun.l.google.com:19302
      */
-    @Value("${kk.p2p.ice.stun.servers:stun.l.google.com:19302,stun1.l.google.com:19302}")
-    private String iceStunServers;
+    @Value("${kk.p2p.webrtc.stun.servers:stun.l.google.com:19302,stun1.l.google.com:19302}")
+    private String webrtcStunServers;
 
-    @Value("${kk.p2p.ice.turn.enabled:false}")
-    private boolean iceTurnEnabled;
+    @Value("${kk.p2p.webrtc.turn.enabled:false}")
+    private boolean webrtcTurnEnabled;
 
     /**
      * TURN 服务器（逗号/换行分隔）：
      * - 无账号：turn.example.com:3478
      * - 带账号：turn.example.com:3478|username|password
      */
-    @Value("${kk.p2p.ice.turn.servers:}")
-    private String iceTurnServers;
+    @Value("${kk.p2p.webrtc.turn.servers:}")
+    private String webrtcTurnServers;
 
     // 缓存已建立的 VPN 流，Key 为远端 PeerID 的 String
     private final ConcurrentHashMap<String, Stream> activeStreams = new ConcurrentHashMap<>();
@@ -321,18 +317,20 @@ public class Libp2pEngine {
     // 缓存已建立的 Chat 流，Key 为远端 PeerID 的 String
     private final ConcurrentHashMap<String, Stream> chatStreams = new ConcurrentHashMap<>();
 
-    // ICE 信令流（用于交换 offer/answer/candidates；数据面走 UDP）
-    private final ConcurrentHashMap<String, Stream> iceSignalStreams = new ConcurrentHashMap<>();
+    // WebRTC 信令流（用于交换 SDP offer/answer + ICE candidates）
+    private final ConcurrentHashMap<String, Stream> webrtcSignalStreams = new ConcurrentHashMap<>();
 
-    // ICE 会话（UDP 数据通道）
-    private final ConcurrentHashMap<String, IceNegotiation> iceNegotiations = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, IceUdpSession> iceSessions = new ConcurrentHashMap<>();
+    // WebRTC 会话（DataChannel：chat/vpn）
+    private final ConcurrentHashMap<String, RtcNegotiation> webrtcNegotiations = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, WebRtcDataSession> webrtcSessions = new ConcurrentHashMap<>();
 
-    private static final class IceNegotiation {
-        final CompletableFuture<IceUdpSession> future = new CompletableFuture<>();
-        volatile IceUdpSession session;
+    private static final class RtcNegotiation {
+        final CompletableFuture<WebRtcDataSession> future = new CompletableFuture<>();
+        volatile WebRtcDataSession session;
         volatile long startedAtMs;
+        volatile boolean offerer;
     }
+
 
     // Chat 消息回调：参数为 (fromPeerId, message)
     private volatile BiConsumer<String, String> chatMessageListener = (peerId, msg) -> {
@@ -413,7 +411,7 @@ public class Libp2pEngine {
                             circuitStopBinding,
                             circuitHopBinding,
                             createPexProtocolBinding(),
-                            createIceSignalProtocolBinding(),
+                            createWebrtcSignalProtocolBinding(),
                             createChatProtocolBinding(),
                             createVpnProtocolBinding()
                     )
@@ -424,12 +422,13 @@ public class Libp2pEngine {
             host.start().get();
             running.set(true);
 
-            // ICE-UDP 数据面回调：将收到的数据路由到 Chat/VPN
-            if (iceEnabled) {
-                initIceDispatcher();
+            // WebRTC 数据面（DataChannel + ICE/STUN/TURN）
+            if (webrtcEnabled) {
+                log.info("WebRTC 数据面已启用（kk.p2p.webrtc.enabled=true）");
             } else {
-                log.info("ICE-UDP 已禁用（kk.p2p.ice.enabled=false）");
+                log.info("WebRTC 数据面已禁用（kk.p2p.webrtc.enabled=false）");
             }
+
 
             // 如果启用了虚拟 VPN，则在 P2P 启动后尝试拉起虚拟网卡（失败不阻断 P2P）
             try {
@@ -635,6 +634,173 @@ public class Libp2pEngine {
         return lastStunError;
     }
 
+    // -------------------- UI / 状态展示：对端链路模式 & WebRTC 状态 --------------------
+
+    private record RtcFailure(long atMs, String message) {
+    }
+
+    private final ConcurrentHashMap<String, RtcFailure> webrtcLastFailures = new ConcurrentHashMap<>();
+
+    public record PeerRealtimeStatus(
+            String peerId,
+            String linkMode,
+            String localAddr,
+            String remoteAddr,
+            String iceState,
+            String iceDetail
+    ) {
+    }
+
+    public PeerRealtimeStatus getPeerRealtimeStatus(String peerIdStr) {
+        String pid = (peerIdStr == null ? "" : peerIdStr.trim());
+        if (pid.isBlank()) {
+            return new PeerRealtimeStatus("", "未选择", "-", "-", webrtcEnabled ? "未建立" : "禁用", "-");
+        }
+
+        // 链路：优先 Chat/VPN，其次 WebRTC 信令流
+        Stream s = chatStreams.get(pid);
+        if (s == null) {
+            s = activeStreams.get(pid);
+        }
+        if (s == null) {
+            s = webrtcSignalStreams.get(pid);
+        }
+
+        String local = "-";
+        String remote = "-";
+        String linkMode;
+
+        if (s == null) {
+            linkMode = "未连接";
+        } else {
+            try {
+                Connection c = s.getConnection();
+                if (c != null) {
+                    Multiaddr la = c.localAddress();
+                    Multiaddr ra = c.remoteAddress();
+                    if (la != null) {
+                        local = la.toString();
+                    }
+                    if (ra != null) {
+                        remote = ra.toString();
+                    }
+                }
+            } catch (Exception ignore) {
+            }
+
+            linkMode = classifyLinkMode(pid, remote);
+        }
+
+        // WebRTC（通过 record 字段 iceState/iceDetail 复用 UI 展示位）
+        String iceState;
+        String iceDetail;
+
+        if (!webrtcEnabled) {
+            iceState = "禁用";
+            iceDetail = "-";
+        } else {
+            WebRtcDataSession sess = webrtcSessions.get(pid);
+            if (sess != null && sess.isConnected()) {
+                iceState = "已建立";
+                String d = sess.getDetail();
+                iceDetail = (d == null || d.isBlank()) ? "-" : d;
+            } else {
+                RtcNegotiation neg = webrtcNegotiations.get(pid);
+                if (neg != null && !neg.future.isDone()) {
+                    long dt = Math.max(0, System.currentTimeMillis() - neg.startedAtMs);
+                    iceState = "协商中";
+                    iceDetail = "已耗时 " + (dt / 1000.0) + "s";
+                } else {
+                    RtcFailure f = webrtcLastFailures.get(pid);
+                    if (f != null && f.message != null && !f.message.isBlank()) {
+                        long dt = Math.max(0, System.currentTimeMillis() - f.atMs);
+                        iceState = "失败";
+                        iceDetail = f.message + " (" + (dt / 1000.0) + "s前)";
+                    } else {
+                        iceState = "未建立";
+                        iceDetail = "-";
+                    }
+                }
+            }
+        }
+
+        return new PeerRealtimeStatus(pid, linkMode, local, remote, iceState, iceDetail);
+    }
+
+    private String classifyLinkMode(String peerId, String remoteAddrStr) {
+        if (remoteAddrStr == null || remoteAddrStr.isBlank() || "-".equals(remoteAddrStr)) {
+            return "未知";
+        }
+
+        String r = remoteAddrStr;
+        if (r.contains("/p2p-circuit")) {
+            return "中继(REL)";
+        }
+
+        String ip4 = extractIp4(r);
+        boolean isPrivate = ip4 != null && isPrivateIpv4(ip4);
+
+        if (isPrivate) {
+            Long seenAt = mdnsSeenAtMs.get(peerId);
+            if (seenAt != null) {
+                long dt = Math.max(0, System.currentTimeMillis() - seenAt);
+                // 认为 10 分钟内发现过的，属于“mDNS 内网路径”
+                if (dt <= TimeUnit.MINUTES.toMillis(10)) {
+                    return "内网(mDNS)";
+                }
+            }
+            return "直连(内网)";
+        }
+
+        return "直连(公网)";
+    }
+
+    private static String extractIp4(String multiaddr) {
+        if (multiaddr == null) {
+            return null;
+        }
+        int idx = multiaddr.indexOf("/ip4/");
+        if (idx < 0) {
+            return null;
+        }
+        int start = idx + "/ip4/".length();
+        int end = multiaddr.indexOf('/', start);
+        if (end < 0) {
+            end = multiaddr.length();
+        }
+        String ip = multiaddr.substring(start, end).trim();
+        return ip.isBlank() ? null : ip;
+    }
+
+    private static boolean isPrivateIpv4(String ip) {
+        try {
+            InetAddress a = InetAddress.getByName(ip);
+            if (!(a instanceof Inet4Address)) {
+                return false;
+            }
+            return a.isSiteLocalAddress() || a.isLinkLocalAddress();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static String summarize(Throwable ex) {
+        if (ex == null) {
+            return "unknown";
+        }
+        String msg = ex.getMessage();
+        String name = ex.getClass().getSimpleName();
+        if (msg == null || msg.isBlank()) {
+            return name;
+        }
+        // 避免换行/太长
+        String m = msg.replace('\n', ' ').replace('\r', ' ').trim();
+        if (m.length() > 180) {
+            m = m.substring(0, 180) + "...";
+        }
+        return name + ": " + m;
+    }
+
     private void startMdnsDiscovery() {
         if (!mdnsEnabled || host == null || !running.get()) {
             return;
@@ -697,6 +863,7 @@ public class Libp2pEngine {
 
 
             peerAddrCache.put(pid, addrs);
+            mdnsSeenAtMs.put(pid, System.currentTimeMillis());
             try {
                 host.getAddressBook().addAddrs(PeerId.fromBase58(pid), ADDR_TTL_MS, addrs.toArray(new Multiaddr[0])).exceptionally(ex -> null);
             } catch (Exception ignore) {
@@ -705,6 +872,7 @@ public class Libp2pEngine {
             lastMdnsPeer = pid + " @ " + addrs.get(0);
             int n = mdnsPeersFound.incrementAndGet();
             log.info("mDNS 发现对等节点({}): {}", n, lastMdnsPeer);
+
         } catch (Exception e) {
             log.debug("处理 mDNS peer 失败", e);
         }
@@ -1239,96 +1407,54 @@ public class Libp2pEngine {
 
 
 
-    // -------------------- ICE 信令（通过 libp2p 交换 offer/answer/candidates）--------------------
 
-    private void initIceDispatcher() {
-        IceUdpSession.IceUdpSessionCallbacks.setDispatcher((fromPeerId, type, payload) -> {
-            if (type == null) {
-                return;
-            }
-            byte t = type;
 
-            if (t == IceUdpSession.TYPE_CHAT) {
-                String msg = new String(payload == null ? new byte[0] : payload, StandardCharsets.UTF_8);
-                BiConsumer<String, String> listener = chatMessageListener;
-                if (listener != null) {
-                    listener.accept(fromPeerId, msg);
-                }
-                return;
-            }
 
-            if (t == IceUdpSession.TYPE_VPN) {
-                if (payload != null && payload.length > 0) {
-                    vpnRxBytesTotal.addAndGet(payload.length);
-                    try {
-                        wintunService.writeToTun(payload);
-                    } catch (Exception e) {
-                        log.debug("ICE-UDP 写入 TUN 失败: {}", (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
-                    }
-                }
-            }
-        });
+    // -------------------- WebRTC 信令（通过 libp2p 交换 SDP offer/answer + ICE candidates）--------------------
 
-        // 简单 keepalive：让 NAT 映射更稳定（即使没有业务流量）
-        relayScheduler.scheduleAtFixedRate(() -> {
-            if (!iceEnabled || !running.get()) {
-                return;
-            }
-            for (IceUdpSession s : iceSessions.values()) {
-                if (s == null || !s.isEstablished()) {
-                    continue;
-                }
-                try {
-                    s.sendPing();
-                } catch (Exception ignore) {
-                }
-            }
-        }, 5, 15, TimeUnit.SECONDS);
-    }
-
-    private ProtocolBinding<IceSignalController> createIceSignalProtocolBinding() {
-        return new ProtocolBinding<IceSignalController>() {
+    private ProtocolBinding<WebrtcSignalController> createWebrtcSignalProtocolBinding() {
+        return new ProtocolBinding<WebrtcSignalController>() {
             @NotNull
             @Override
             public ProtocolDescriptor getProtocolDescriptor() {
-                return new ProtocolDescriptor(ICE_SIGNAL_PROTOCOL_ID);
+                return new ProtocolDescriptor(WEBRTC_SIGNAL_PROTOCOL_ID);
             }
 
             @NotNull
             @Override
-            public CompletableFuture<IceSignalController> initChannel(@NotNull P2PChannel ch, @NotNull String selectedProtocol) {
+            public CompletableFuture<WebrtcSignalController> initChannel(@NotNull P2PChannel ch, @NotNull String selectedProtocol) {
                 Stream stream = (Stream) ch;
-                handleIncomingIceSignalStream(stream);
-                return CompletableFuture.completedFuture(new IceSignalController(stream));
+                handleIncomingWebrtcSignalStream(stream);
+                return CompletableFuture.completedFuture(new WebrtcSignalController(stream));
             }
         };
     }
 
-    public static final class IceSignalController {
+    public static final class WebrtcSignalController {
         public final Stream stream;
 
-        public IceSignalController(Stream stream) {
+        public WebrtcSignalController(Stream stream) {
             this.stream = stream;
         }
     }
 
-    private void handleIncomingIceSignalStream(Stream stream) {
+    private void handleIncomingWebrtcSignalStream(Stream stream) {
         String remotePeerId = stream.remotePeerId().toBase58();
 
-        iceSignalStreams.put(remotePeerId, stream);
-        stream.closeFuture().thenRun(() -> iceSignalStreams.remove(remotePeerId));
+        webrtcSignalStreams.put(remotePeerId, stream);
+        stream.closeFuture().thenRun(() -> webrtcSignalStreams.remove(remotePeerId));
 
         stream.pushHandler(new FramedInboundHandler(MAX_FRAME_SIZE, frame -> {
             String json = frame.toString(StandardCharsets.UTF_8);
-            onIceSignal(remotePeerId, json, stream);
+            onWebrtcSignal(remotePeerId, json, stream);
         }, (ctx, cause) -> {
-            log.debug("ICE 信令流异常: {} {}", remotePeerId, (cause == null ? "unknown" : cause.toString()));
+            log.debug("WebRTC 信令流异常: {} {}", remotePeerId, (cause == null ? "unknown" : cause.toString()));
             ctx.close();
         }));
     }
 
-    private void onIceSignal(String remotePeerId, String json, Stream signalStream) {
-        if (!iceEnabled || remotePeerId == null || remotePeerId.isBlank() || json == null || json.isBlank()) {
+    private void onWebrtcSignal(String remotePeerId, String json, Stream signalStream) {
+        if (!webrtcEnabled || remotePeerId == null || remotePeerId.isBlank() || json == null || json.isBlank()) {
             return;
         }
 
@@ -1341,160 +1467,148 @@ public class Libp2pEngine {
 
             String type = t.trim().toLowerCase();
             switch (type) {
-                case "offer" -> handleIceOffer(remotePeerId, obj, signalStream);
-                case "answer" -> handleIceAnswer(remotePeerId, obj);
+                case "offer" -> handleWebrtcOffer(remotePeerId, obj, signalStream);
+                case "answer" -> handleWebrtcAnswer(remotePeerId, obj);
+                case "cand" -> handleWebrtcCandidate(remotePeerId, obj);
                 default -> {
                 }
             }
         } catch (Exception e) {
-            log.debug("ICE 信令解析失败: {} {}", remotePeerId, e.toString());
+            log.debug("WebRTC 信令解析失败: {} {}", remotePeerId, e.toString());
         }
     }
 
-    private void handleIceOffer(String remotePeerId, JSONObject offer, Stream signalStream) {
-        if (!iceEnabled || !running.get()) {
+    private void handleWebrtcOffer(String remotePeerId, JSONObject offer, Stream signalStream) {
+        if (!webrtcEnabled || !running.get()) {
             return;
         }
 
-        String ufrag = offer.getStr("ufrag");
-        String pwd = offer.getStr("pwd");
-        String nonceB64 = offer.getStr("nonce");
-        JSONArray arr = offer.getJSONArray("cands");
-
-        if (ufrag == null || ufrag.isBlank() || pwd == null || pwd.isBlank() || nonceB64 == null || nonceB64.isBlank()) {
+        String sdp = offer.getStr("sdp");
+        if (sdp == null || sdp.isBlank()) {
             return;
         }
 
-        byte[] nonce;
-        try {
-            nonce = IceUdpSession.b64d(nonceB64.trim());
-        } catch (Exception e) {
+        // 若已建立则忽略
+        WebRtcDataSession existing = webrtcSessions.get(remotePeerId);
+        if (existing != null && existing.isConnected()) {
             return;
         }
 
-        List<String> remoteCands = new ArrayList<>();
-        if (arr != null) {
-            for (int i = 0; i < arr.size(); i++) {
-                String s = Objects.toString(arr.get(i), "");
-                if (!s.isBlank()) {
-                    remoteCands.add(s);
-                }
-            }
-        }
-
-        IceNegotiation neg = iceNegotiations.computeIfAbsent(remotePeerId, k -> {
-            IceNegotiation n = new IceNegotiation();
+        RtcNegotiation neg = webrtcNegotiations.computeIfAbsent(remotePeerId, k -> {
+            RtcNegotiation n = new RtcNegotiation();
             n.startedAtMs = System.currentTimeMillis();
+            n.offerer = false;
             return n;
         });
 
-        // 若已建立则忽略
-        IceUdpSession existing = iceSessions.get(remotePeerId);
-        if (existing != null && existing.isEstablished()) {
-            return;
-        }
-
-        // 若本地正在发起，收到 offer：以“较新的一次”覆盖（简单处理 glare）
-        if (neg.future.isDone()) {
-            iceNegotiations.remove(remotePeerId);
-            neg = iceNegotiations.computeIfAbsent(remotePeerId, k -> {
-                IceNegotiation n = new IceNegotiation();
-                n.startedAtMs = System.currentTimeMillis();
-                return n;
-            });
-        }
-
         try {
-            boolean controlling = isIceControllingFor(remotePeerId);
-            byte[] key = deriveIceKey32(remotePeerId, nonce);
+            WebRtcDataSession sess = WebRtcDataSession.create(remotePeerId, buildWebrtcConfig(), false, newWebrtcCallbacks(remotePeerId, signalStream));
+            neg.session = sess;
 
-            IceUdpSession session = IceUdpSession.create(buildIceConfig(), remotePeerId, controlling, key);
-            neg.session = session;
-
-            session.applyRemote(ufrag.trim(), pwd.trim(), remoteCands);
-
-            IceNegotiation negRef = neg;
-
-            // 等待候选采集，然后回 answer 并开始 checks
-            relayScheduler.execute(() -> {
-                try {
-                    Thread.sleep(Math.max(0, iceGatherTimeoutMs));
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-
-                try {
-                    sendIceAnswer(signalStream, session, nonceB64.trim());
-                } catch (Exception ignore) {
-                }
-
-                session.start(iceConnectTimeoutMs)
-                        .thenRun(() -> onIceEstablished(remotePeerId, negRef, session))
-                        .exceptionally(ex -> {
-                            onIceFailed(remotePeerId, negRef, session, ex);
-                            return null;
-                        });
-            });
+            sess.setRemoteDescription(new dev.onvoid.webrtc.RTCSessionDescription(dev.onvoid.webrtc.RTCSdpType.OFFER, sdp.trim()))
+                    .thenCompose(v -> sess.createAnswer())
+                    .thenAccept(ans -> {
+                        try {
+                            sendWebrtcAnswer(signalStream, ans);
+                        } catch (Exception ignore) {
+                        }
+                        awaitWebrtcConnected(remotePeerId, neg, sess);
+                    })
+                    .exceptionally(ex -> {
+                        onWebrtcFailed(remotePeerId, neg, sess, ex);
+                        return null;
+                    });
 
         } catch (Exception e) {
-            neg.future.completeExceptionally(e);
+            onWebrtcFailed(remotePeerId, neg, null, e);
         }
     }
 
-    private void handleIceAnswer(String remotePeerId, JSONObject answer) {
-        if (!iceEnabled || !running.get()) {
+    private void handleWebrtcAnswer(String remotePeerId, JSONObject answer) {
+        if (!webrtcEnabled || !running.get()) {
             return;
         }
 
-        IceNegotiation neg = iceNegotiations.get(remotePeerId);
+        String sdp = answer.getStr("sdp");
+        if (sdp == null || sdp.isBlank()) {
+            return;
+        }
+
+        RtcNegotiation neg = webrtcNegotiations.get(remotePeerId);
         if (neg == null || neg.future.isDone()) {
             return;
         }
 
-        IceUdpSession session = neg.session;
-        if (session == null) {
+        WebRtcDataSession sess = neg.session;
+        if (sess == null) {
             return;
         }
 
-        String ufrag = answer.getStr("ufrag");
-        String pwd = answer.getStr("pwd");
-        JSONArray arr = answer.getJSONArray("cands");
-
-        if (ufrag == null || ufrag.isBlank() || pwd == null || pwd.isBlank()) {
-            return;
-        }
-
-        List<String> remoteCands = new ArrayList<>();
-        if (arr != null) {
-            for (int i = 0; i < arr.size(); i++) {
-                String s = Objects.toString(arr.get(i), "");
-                if (!s.isBlank()) {
-                    remoteCands.add(s);
-                }
-            }
-        }
-
-        try {
-            session.applyRemote(ufrag.trim(), pwd.trim(), remoteCands);
-        } catch (Exception e) {
-            onIceFailed(remotePeerId, neg, session, e);
-            return;
-        }
-
-        session.start(iceConnectTimeoutMs)
-                .thenRun(() -> onIceEstablished(remotePeerId, neg, session))
+        sess.setRemoteDescription(new dev.onvoid.webrtc.RTCSessionDescription(dev.onvoid.webrtc.RTCSdpType.ANSWER, sdp.trim()))
+                .thenAccept(v -> awaitWebrtcConnected(remotePeerId, neg, sess))
                 .exceptionally(ex -> {
-                    onIceFailed(remotePeerId, neg, session, ex);
+                    onWebrtcFailed(remotePeerId, neg, sess, ex);
                     return null;
                 });
     }
 
-    private void onIceEstablished(String peerId, IceNegotiation neg, IceUdpSession session) {
-        iceSessions.put(peerId, session);
-        neg.future.complete(session);
+    private void handleWebrtcCandidate(String remotePeerId, JSONObject candObj) {
+        if (!webrtcEnabled || !running.get()) {
+            return;
+        }
+
+        String mid = candObj.getStr("mid");
+        Integer mline = candObj.getInt("mline");
+        String cand = candObj.getStr("cand");
+
+        if (cand == null || cand.isBlank()) {
+            return;
+        }
+
+        WebRtcDataSession sess = webrtcSessions.get(remotePeerId);
+        if (sess == null) {
+            RtcNegotiation neg = webrtcNegotiations.get(remotePeerId);
+            sess = (neg == null ? null : neg.session);
+        }
+        if (sess == null) {
+            return;
+        }
+
+        try {
+            sess.addRemoteIceCandidate(new dev.onvoid.webrtc.RTCIceCandidate(mid, mline == null ? 0 : mline, cand));
+        } catch (Exception ignore) {
+        }
     }
 
-    private void onIceFailed(String peerId, IceNegotiation neg, IceUdpSession session, Throwable ex) {
+    private void awaitWebrtcConnected(String peerId, RtcNegotiation neg, WebRtcDataSession sess) {
+        if (peerId == null || peerId.isBlank() || neg == null || sess == null) {
+            return;
+        }
+
+        long totalTimeout = Math.max(3000, webrtcConnectTimeoutMs);
+        long dt = Math.max(0, System.currentTimeMillis() - neg.startedAtMs);
+        long left = Math.max(1000, totalTimeout - dt);
+
+        sess.whenConnected()
+                .orTimeout(left, TimeUnit.MILLISECONDS)
+                .thenRun(() -> onWebrtcEstablished(peerId, neg, sess))
+                .exceptionally(ex -> {
+                    onWebrtcFailed(peerId, neg, sess, ex);
+                    return null;
+                });
+    }
+
+    private void onWebrtcEstablished(String peerId, RtcNegotiation neg, WebRtcDataSession session) {
+        webrtcLastFailures.remove(peerId);
+        webrtcSessions.put(peerId, session);
+        if (!neg.future.isDone()) {
+            neg.future.complete(session);
+        }
+        webrtcNegotiations.remove(peerId, neg);
+    }
+
+    private void onWebrtcFailed(String peerId, RtcNegotiation neg, WebRtcDataSession session, Throwable ex) {
+        webrtcLastFailures.put(peerId, new RtcFailure(System.currentTimeMillis(), summarize(ex)));
         try {
             if (session != null) {
                 session.close();
@@ -1502,129 +1616,154 @@ public class Libp2pEngine {
         } catch (Exception ignore) {
         }
         if (!neg.future.isDone()) {
-            neg.future.completeExceptionally(ex == null ? new IllegalStateException("ice failed") : ex);
+            neg.future.completeExceptionally(ex == null ? new IllegalStateException("webrtc failed") : ex);
         }
-        iceNegotiations.remove(peerId);
+        webrtcNegotiations.remove(peerId);
     }
 
-    private void sendIceOffer(Stream stream, IceUdpSession session, String nonceB64) {
+    private void sendWebrtcOffer(Stream stream, dev.onvoid.webrtc.RTCSessionDescription offer) {
         JSONObject obj = new JSONObject();
         obj.set("t", "offer");
-        obj.set("ufrag", session.getLocalUfrag());
-        obj.set("pwd", session.getLocalPassword());
-        obj.set("nonce", nonceB64);
-
-        JSONArray cands = new JSONArray();
-        for (String c : session.getLocalCandidateLines()) {
-            cands.add(c);
-        }
-        obj.set("cands", cands);
-
+        obj.set("sdp", offer == null ? "" : offer.sdp);
         stream.writeAndFlush(frame(obj.toString().getBytes(StandardCharsets.UTF_8)));
     }
 
-    private void sendIceAnswer(Stream stream, IceUdpSession session, String nonceB64) {
+    private void sendWebrtcAnswer(Stream stream, dev.onvoid.webrtc.RTCSessionDescription answer) {
         JSONObject obj = new JSONObject();
         obj.set("t", "answer");
-        obj.set("ufrag", session.getLocalUfrag());
-        obj.set("pwd", session.getLocalPassword());
-        obj.set("nonce", nonceB64);
-
-        JSONArray cands = new JSONArray();
-        for (String c : session.getLocalCandidateLines()) {
-            cands.add(c);
-        }
-        obj.set("cands", cands);
-
+        obj.set("sdp", answer == null ? "" : answer.sdp);
         stream.writeAndFlush(frame(obj.toString().getBytes(StandardCharsets.UTF_8)));
     }
 
-    private CompletableFuture<IceUdpSession> ensureIceSession(String peerIdStr) {
-        if (!iceEnabled) {
-            return CompletableFuture.failedFuture(new IllegalStateException("ice disabled"));
+    private void sendWebrtcCandidate(Stream stream, dev.onvoid.webrtc.RTCIceCandidate cand) {
+        if (cand == null) {
+            return;
+        }
+        JSONObject obj = new JSONObject();
+        obj.set("t", "cand");
+        obj.set("mid", cand.sdpMid);
+        obj.set("mline", cand.sdpMLineIndex);
+        obj.set("cand", cand.sdp);
+        stream.writeAndFlush(frame(obj.toString().getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private WebRtcDataSession.Callbacks newWebrtcCallbacks(String remotePeerId, Stream signalStream) {
+        return new WebRtcDataSession.Callbacks() {
+            @Override
+            public void onLocalIceCandidate(dev.onvoid.webrtc.RTCIceCandidate cand) {
+                try {
+                    sendWebrtcCandidate(signalStream, cand);
+                } catch (Exception ignore) {
+                }
+            }
+
+            @Override
+            public void onChatMessage(String fromPeerId, String message) {
+                BiConsumer<String, String> listener = chatMessageListener;
+                if (listener != null) {
+                    listener.accept(fromPeerId, message == null ? "" : message);
+                }
+            }
+
+            @Override
+            public void onVpnPacket(String fromPeerId, byte[] packet) {
+                if (packet != null && packet.length > 0) {
+                    vpnRxBytesTotal.addAndGet(packet.length);
+                    try {
+                        wintunService.writeToTun(packet);
+                    } catch (Exception e) {
+                        log.debug("WebRTC 写入 TUN 失败: {}", (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
+                    }
+                }
+            }
+
+            @Override
+            public void onStateChanged(String fromPeerId, String state, String detail) {
+            }
+        };
+    }
+
+    private CompletableFuture<WebRtcDataSession> ensureWebrtcSession(String peerIdStr) {
+        if (!webrtcEnabled) {
+            return CompletableFuture.failedFuture(new IllegalStateException("webrtc disabled"));
         }
         if (!running.get() || host == null) {
             return CompletableFuture.failedFuture(new IllegalStateException("engine is not running"));
         }
 
-        IceUdpSession existing = iceSessions.get(peerIdStr);
-        if (existing != null && existing.isEstablished()) {
+        WebRtcDataSession existing = webrtcSessions.get(peerIdStr);
+        if (existing != null && existing.isConnected()) {
             return CompletableFuture.completedFuture(existing);
         }
 
-        IceNegotiation ongoing = iceNegotiations.get(peerIdStr);
+        RtcNegotiation ongoing = webrtcNegotiations.get(peerIdStr);
         if (ongoing != null && !ongoing.future.isDone()) {
             return ongoing.future;
         }
 
-        IceNegotiation neg = new IceNegotiation();
+        webrtcLastFailures.remove(peerIdStr);
+
+        RtcNegotiation neg = new RtcNegotiation();
         neg.startedAtMs = System.currentTimeMillis();
-        IceNegotiation prev = iceNegotiations.put(peerIdStr, neg);
+        neg.offerer = isWebrtcOffererFor(peerIdStr);
+
+        RtcNegotiation prev = webrtcNegotiations.put(peerIdStr, neg);
         if (prev != null && !prev.future.isDone()) {
-            // 有其他线程先发起了
-            iceNegotiations.put(peerIdStr, prev);
+            webrtcNegotiations.put(peerIdStr, prev);
             return prev.future;
         }
 
-        startIceAsInitiator(peerIdStr, neg);
+        startWebrtcAsInitiator(peerIdStr, neg);
 
-        long totalTimeout = Math.max(2000, iceGatherTimeoutMs + iceConnectTimeoutMs + 2000);
+        long totalTimeout = Math.max(3000, webrtcConnectTimeoutMs);
         relayScheduler.schedule(() -> {
             if (!neg.future.isDone()) {
-                onIceFailed(peerIdStr, neg, neg.session, new IllegalStateException("ice negotiation timeout"));
+                onWebrtcFailed(peerIdStr, neg, neg.session, new IllegalStateException("webrtc negotiation timeout"));
             }
         }, totalTimeout, TimeUnit.MILLISECONDS);
 
         return neg.future;
     }
 
-    private void triggerIceNegotiationAsync(String peerIdStr) {
-        if (!iceEnabled || !running.get()) {
+    private void triggerWebrtcNegotiationAsync(String peerIdStr) {
+        if (!webrtcEnabled || !running.get()) {
             return;
         }
-        ensureIceSession(peerIdStr).exceptionally(ex -> null);
+        ensureWebrtcSession(peerIdStr).exceptionally(ex -> null);
     }
 
-    private void startIceAsInitiator(String peerIdStr, IceNegotiation neg) {
-        openIceSignalStream(peerIdStr)
+    private void startWebrtcAsInitiator(String peerIdStr, RtcNegotiation neg) {
+        openWebrtcSignalStream(peerIdStr)
                 .thenAccept(stream -> {
                     try {
-                        byte[] nonce = new byte[16];
-                        new SecureRandom().nextBytes(nonce);
-                        String nonceB64 = IceUdpSession.b64(nonce);
+                        WebRtcDataSession sess = WebRtcDataSession.create(peerIdStr, buildWebrtcConfig(), true, newWebrtcCallbacks(peerIdStr, stream));
+                        neg.session = sess;
 
-                        boolean controlling = isIceControllingFor(peerIdStr);
-                        byte[] key = deriveIceKey32(peerIdStr, nonce);
-
-                        IceUdpSession session = IceUdpSession.create(buildIceConfig(), peerIdStr, controlling, key);
-                        neg.session = session;
-
-                        relayScheduler.execute(() -> {
-                            try {
-                                Thread.sleep(Math.max(0, iceGatherTimeoutMs));
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                            }
-
-                            try {
-                                sendIceOffer(stream, session, nonceB64);
-                            } catch (Exception e) {
-                                onIceFailed(peerIdStr, neg, session, e);
-                            }
-                        });
+                        sess.createOffer()
+                                .thenAccept(offer -> {
+                                    try {
+                                        sendWebrtcOffer(stream, offer);
+                                    } catch (Exception e) {
+                                        onWebrtcFailed(peerIdStr, neg, sess, e);
+                                    }
+                                })
+                                .exceptionally(ex -> {
+                                    onWebrtcFailed(peerIdStr, neg, sess, ex);
+                                    return null;
+                                });
 
                     } catch (Exception e) {
-                        onIceFailed(peerIdStr, neg, null, e);
+                        onWebrtcFailed(peerIdStr, neg, null, e);
                     }
                 })
                 .exceptionally(ex -> {
-                    onIceFailed(peerIdStr, neg, null, ex);
+                    onWebrtcFailed(peerIdStr, neg, null, ex);
                     return null;
                 });
     }
 
-    private CompletableFuture<Stream> openIceSignalStream(String peerIdStr) {
-        Stream existing = iceSignalStreams.get(peerIdStr);
+    private CompletableFuture<Stream> openWebrtcSignalStream(String peerIdStr) {
+        Stream existing = webrtcSignalStreams.get(peerIdStr);
         if (existing != null) {
             return CompletableFuture.completedFuture(existing);
         }
@@ -1646,80 +1785,56 @@ public class Libp2pEngine {
                 .thenCompose(conn -> {
                     tryOpenPex(conn);
                     return conn.muxerSession()
-                            .createStream(createIceSignalProtocolBinding())
+                            .createStream(createWebrtcSignalProtocolBinding())
                             .getController();
                 })
                 .thenApply(controller -> {
                     Stream s = controller.stream;
-                    iceSignalStreams.put(peerIdStr, s);
-                    s.closeFuture().thenRun(() -> iceSignalStreams.remove(peerIdStr));
+                    webrtcSignalStreams.put(peerIdStr, s);
+                    s.closeFuture().thenRun(() -> webrtcSignalStreams.remove(peerIdStr));
                     return s;
                 });
     }
 
-    private boolean isIceControllingFor(String remotePeerId) {
+    private boolean isWebrtcOffererFor(String remotePeerId) {
         String self = getSelfPeerId();
         if (self == null || self.isBlank() || remotePeerId == null || remotePeerId.isBlank()) {
             return true;
         }
-        // 使用确定性规则避免 glare：两端对比 PeerID 字符串，较大的作为 controlling
+        // 仍用确定性规则避免 glare：两端对比 PeerID 字符串，较大的作为 offerer
         return self.compareTo(remotePeerId) > 0;
     }
 
-    private byte[] deriveIceKey32(String remotePeerId, byte[] nonce) {
-        try {
-            String self = getSelfPeerId();
-            String a = (self == null ? "" : self);
-            String b = (remotePeerId == null ? "" : remotePeerId);
-            String lo = a.compareTo(b) <= 0 ? a : b;
-            String hi = a.compareTo(b) <= 0 ? b : a;
+    private WebRtcDataSession.Config buildWebrtcConfig() {
+        WebRtcDataSession.Config cfg = new WebRtcDataSession.Config();
+        cfg.minPort = Math.max(0, webrtcPortMin);
+        cfg.maxPort = Math.max(0, webrtcPortMax);
 
-            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-            md.update("kk-ice|".getBytes(StandardCharsets.UTF_8));
-            md.update(lo.getBytes(StandardCharsets.UTF_8));
-            md.update((byte) '|');
-            md.update(hi.getBytes(StandardCharsets.UTF_8));
-            md.update((byte) '|');
-            md.update(nonce == null ? new byte[0] : nonce);
-            return md.digest();
-        } catch (Exception e) {
-            // 兜底：随机 key（不推荐，但避免直接崩）
-            return IceUdpSession.newAesKey32();
-        }
-    }
-
-    private IceUdpSession.Config buildIceConfig() {
-        IceUdpSession.Config cfg = new IceUdpSession.Config();
-        cfg.minPort = Math.max(0, icePortMin);
-        cfg.maxPort = Math.max(0, icePortMax);
-
-        cfg.enableStun = true;
         cfg.stunServers = new ArrayList<>();
-        for (InetSocketAddress s : parseStunServers(iceStunServers)) {
+        for (InetSocketAddress s : parseStunServers(webrtcStunServers)) {
             if (s == null) {
                 continue;
             }
             String host = s.getHostString();
             int port = s.getPort();
             if (host != null && !host.isBlank() && port > 0) {
-                cfg.stunServers.add(new IceUdpSession.Config.Server(host, port));
+                cfg.stunServers.add(host + ":" + port);
             }
         }
 
-        cfg.enableTurn = iceTurnEnabled;
-        cfg.turnServers = parseTurnServers(iceTurnServers);
-
+        cfg.enableTurn = webrtcTurnEnabled;
+        cfg.turnServers = parseWebrtcTurnServers(webrtcTurnServers);
         return cfg;
     }
 
-    private static List<IceUdpSession.Config.TurnServer> parseTurnServers(String servers) {
+    private static List<WebRtcDataSession.Config.TurnServer> parseWebrtcTurnServers(String servers) {
         String s = servers == null ? "" : servers.trim();
         if (s.isBlank()) {
             return List.of();
         }
 
         String[] parts = s.split("[\\r\\n,]+");
-        List<IceUdpSession.Config.TurnServer> out = new ArrayList<>();
+        List<WebRtcDataSession.Config.TurnServer> out = new ArrayList<>();
 
         for (String p : parts) {
             String v = p == null ? "" : p.trim();
@@ -1759,12 +1874,13 @@ public class Libp2pEngine {
             }
 
             if (!host.isBlank()) {
-                out.add(new IceUdpSession.Config.TurnServer(host, port, user, pass));
+                out.add(new WebRtcDataSession.Config.TurnServer(host, port, user, pass));
             }
         }
 
         return out;
     }
+
 
     private ProtocolBinding<ChatController> createChatProtocolBinding() {
         return new ProtocolBinding<ChatController>() {
@@ -1886,17 +2002,17 @@ public class Libp2pEngine {
 
         String msg = (message == null ? "" : message);
 
-        // 发送优先：ICE-UDP（打洞成功后走 UDP 数据面），失败再回落到 libp2p(TCP/Relay)
-        if (iceEnabled && icePreferChat) {
-            return sendChatMessageViaIce(targetPeerIdStr, msg)
+        // 发送优先：WebRTC DataChannel（优先走 UDP），失败再回落到 libp2p(TCP/Relay)
+        if (webrtcEnabled && webrtcPreferChat) {
+            return sendChatMessageViaWebrtc(targetPeerIdStr, msg)
                     .exceptionallyCompose(ex -> sendChatMessageOverLibp2p(targetPeerIdStr, msg));
         }
 
         return sendChatMessageOverLibp2p(targetPeerIdStr, msg);
     }
 
-    private CompletableFuture<Void> sendChatMessageViaIce(String targetPeerIdStr, String msg) {
-        return ensureIceSession(targetPeerIdStr)
+    private CompletableFuture<Void> sendChatMessageViaWebrtc(String targetPeerIdStr, String msg) {
+        return ensureWebrtcSession(targetPeerIdStr)
                 .thenAccept(sess -> sess.sendChat(msg));
     }
 
@@ -2220,10 +2336,10 @@ public class Libp2pEngine {
             return;
         }
 
-        // 发送优先：ICE-UDP（打洞成功后走 UDP 数据面），失败再回落到 libp2p(TCP/Relay)
-        if (iceEnabled && icePreferVpn) {
-            IceUdpSession s = iceSessions.get(targetPeerId);
-            if (s != null && s.isEstablished()) {
+        // 发送优先：WebRTC DataChannel（优先走 UDP），失败再回落到 libp2p(TCP/Relay)
+        if (webrtcEnabled && webrtcPreferVpn) {
+            WebRtcDataSession s = webrtcSessions.get(targetPeerId);
+            if (s != null && s.isConnected()) {
                 try {
                     s.sendVpnPacket(packetData);
                     vpnTxBytesTotal.addAndGet(packetData.length);
@@ -2231,10 +2347,11 @@ public class Libp2pEngine {
                 } catch (Exception ignore) {
                 }
             } else {
-                // 触发后台打洞（不阻塞当前包），后续包优先走 UDP
-                triggerIceNegotiationAsync(targetPeerId);
+                // 触发后台协商（不阻塞当前包），后续包优先走 UDP
+                triggerWebrtcNegotiationAsync(targetPeerId);
             }
         }
+
 
         vpnTxBytesTotal.addAndGet(packetData.length);
 

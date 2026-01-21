@@ -51,11 +51,21 @@
             <version>${jna.version}</version>
         </dependency>
 
-        <!-- ICE/STUN/TURN (UDP 打洞)：优先让数据面走 UDP，失败再回落到 libp2p(TCP/Relay) -->
+
+        <!-- WebRTC（DataChannel + ICE/STUN/TURN）：数据面优先走 UDP，失败再回落到 libp2p(TCP/Relay) -->
         <dependency>
-            <groupId>org.jitsi</groupId>
-            <artifactId>ice4j</artifactId>
-            <version>3.2-12-gc2cbf61</version>
+            <groupId>dev.onvoid.webrtc</groupId>
+            <artifactId>webrtc-java</artifactId>
+            <version>0.14.0</version>
+        </dependency>
+
+        <!-- Windows 原生库（JNI）：webrtc-java 会从该 jar 中解压/加载 DLL -->
+        <dependency>
+            <groupId>dev.onvoid.webrtc</groupId>
+            <artifactId>webrtc-java</artifactId>
+            <version>0.14.0</version>
+            <classifier>windows-x86_64</classifier>
+            <scope>runtime</scope>
         </dependency>
     </dependencies>
 </project>

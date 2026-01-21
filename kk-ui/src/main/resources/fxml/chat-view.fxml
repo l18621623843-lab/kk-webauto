@@ -73,7 +73,7 @@
 
                         <Label text="Bootstrap状态:" GridPane.rowIndex="3" GridPane.columnIndex="0" />
                         <Label fx:id="bootstrapStatusLabel" text="-" GridPane.rowIndex="3" GridPane.columnIndex="1" />
-                        <Button text="刷新" onAction="#handleRefreshBootstrap" GridPane.rowIndex="3" GridPane.columnIndex="2" />
+                        <Label text="" GridPane.rowIndex="3" GridPane.columnIndex="2" />
 
                         <Label text="公网(Google):" GridPane.rowIndex="4" GridPane.columnIndex="0" />
                         <Label fx:id="googleStatusLabel" text="未检测" GridPane.rowIndex="4" GridPane.columnIndex="1" />
@@ -81,14 +81,22 @@
 
                         <Label text="mDNS 发现:" GridPane.rowIndex="5" GridPane.columnIndex="0" />
                         <Label fx:id="mdnsStatusLabel" text="-" GridPane.rowIndex="5" GridPane.columnIndex="1" />
-                        <Button text="刷新" onAction="#handleRefreshMdns" GridPane.rowIndex="5" GridPane.columnIndex="2" />
+                        <Label text="" GridPane.rowIndex="5" GridPane.columnIndex="2" />
 
                         <Label text="STUN(UDP):" GridPane.rowIndex="6" GridPane.columnIndex="0" />
                         <Label fx:id="stunStatusLabel" text="-" GridPane.rowIndex="6" GridPane.columnIndex="1" />
-                        <Button text="刷新" onAction="#handleRefreshStun" GridPane.rowIndex="6" GridPane.columnIndex="2" />
+                        <Label text="" GridPane.rowIndex="6" GridPane.columnIndex="2" />
+
+                        <Label text="当前链路:" GridPane.rowIndex="7" GridPane.columnIndex="0" />
+                        <Label fx:id="peerLinkModeLabel" text="-" wrapText="true" GridPane.rowIndex="7" GridPane.columnIndex="1" />
+                        <Label text="" GridPane.rowIndex="7" GridPane.columnIndex="2" />
+
+                        <Label text="WebRTC(UDP):" GridPane.rowIndex="8" GridPane.columnIndex="0" />
+                        <Label fx:id="iceStatusLabel" text="-" wrapText="true" GridPane.rowIndex="8" GridPane.columnIndex="1" />
+                        <Label text="" GridPane.rowIndex="8" GridPane.columnIndex="2" />
                     </GridPane>
 
-                    <Label text="提示：优先直连（局域网/mDNS/已缓存地址），必要时使用 /p2p-circuit 地址兜底。" />
+                    <Label text="提示：状态每 1 秒自动更新；链路优先直连（局域网/mDNS/已缓存地址），必要时使用 /p2p-circuit 兜底。" />
                 </VBox>
             </Tab>
 
@@ -116,7 +124,7 @@
 
                         <Label text="Relay 状态:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
                         <Label fx:id="relayStatusLabel" text="-" GridPane.rowIndex="2" GridPane.columnIndex="1" />
-                        <Button text="刷新" onAction="#handleRefreshRelay" GridPane.rowIndex="2" GridPane.columnIndex="2" />
+                        <Label text="" GridPane.rowIndex="2" GridPane.columnIndex="2" />
 
                         <Label text="Relay 地址:" GridPane.rowIndex="3" GridPane.columnIndex="0" />
                         <TextArea fx:id="relayAddrsArea" editable="false" wrapText="true" prefRowCount="3"
