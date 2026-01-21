@@ -1,7 +1,0 @@
-Compiled from "CircuitHopProtocol.java"
-public class io.libp2p.protocol.circuit.CircuitHopProtocol$Binding extends io.libp2p.core.multistream.StrictProtocolBinding<io.libp2p.protocol.circuit.CircuitHopProtocol$HopController> implements io.libp2p.protocol.circuit.HostConsumer {
-  private final io.libp2p.protocol.circuit.CircuitHopProtocol hop;
-  private io.libp2p.protocol.circuit.CircuitHopProtocol$Binding(io.libp2p.protocol.circuit.CircuitHopProtocol);
-  public io.libp2p.protocol.circuit.CircuitHopProtocol$Binding(io.libp2p.protocol.circuit.CircuitHopProtocol$RelayManager, io.libp2p.protocol.circuit.CircuitStopProtocol$Binding);
-  public void setHost(io.libp2p.core.Host);
-}
