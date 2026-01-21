@@ -1,137 +1,180 @@
+# ===================== Spring Boot 基础配置 =====================
 spring:
   application:
+    # 应用名（用于日志、Spring 上下文标识等）
     name: kk
+
   main:
+    # JavaFX 桌面应用：不启动 Web 容器（Tomcat/Jetty/Undertow）
     web-application-type: none
+
+    # 关闭 Spring Boot Banner（控制台更干净）
     banner-mode: off
-    allow-bean-definition-overriding: false
+
   threads:
     virtual:
-      # 开启虚拟线程
+      # 启用虚拟线程（JDK 21+）：降低阻塞 I/O 场景的线程成本
       enabled: true
+
+
+# ===================== 日志配置 =====================
 logging:
   level:
+    # 全局日志级别
     root: INFO
+
+    # 本项目包日志级别（调试 P2P/GUI 时建议 DEBUG）
     com.kk: DEBUG
+
   pattern:
+    # 控制台日志格式
     console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
   file:
+    # 输出到文件（相对路径基于工作目录）
     name: logs/kk-webauto.log
-    max-size: 10MB
-    max-history: 7
 
-# Playwright配置
-automation:
-  playwright:
-    timeout: 30000
-    slow-mo: 50
-    screenshot-path: ./screenshots
-    trace-enabled: false
-  browser:
-    type: chromium  # chromium, firefox, webkit
-    default-headless: false
-    viewport:
-      width: 1920
-      height: 1080
-    user-agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-  task:
-    max-concurrent: 3
-    default-delay: 500
-    retry-times: 1
+  logback:
+    rollingpolicy:
+      # 单个日志文件最大大小（超过会滚动）
+      max-file-size: 10MB
 
+      # 保留历史文件数量（超出会删除旧文件）
+      max-history: 7
+
+
+# ===================== 虚拟 VPN（Windows / Wintun） =====================
+# 说明：
+# - 仅当你希望把系统流量“引导进 P2P 隧道”时才需要开启。
+# - 通常需要管理员权限（创建/配置网卡）。
+# - VPN 的数据会由 P2P 引擎转发给指定对端（vpn.target.peerid）。
 vpn:
-  # 是否启用虚拟 VPN（Windows/Wintun）。开启通常需要管理员权限。
+  # 是否在应用启动后自动尝试启动 VPN（由 WintunService.startIfEnabled() 决定）
   enabled: false
-  ip:
-    address: 10.8.0.3
-    mask: 255.255.255.0
-  # 目标 PeerID（把虚拟网卡流量发给谁）
-#  target:
-#    peerid: 12D3KooWDxxxEcfm4ni81fhP8wxycZ8vcqQDR7F8Lx2hpZMRzJ17
 
+  ip:
+    # 本机虚拟网卡 IP（示例：10.8.0.3；两端应处于同一网段且不冲突）
+    address: 10.8.0.3
+
+    # 本机虚拟网卡掩码（默认 /24）
+    mask: 255.255.255.0
+
+  target:
+    # 目标 PeerID：把本机虚拟网卡读到的出站 IP 包转发给谁
+    # - 为空：VPN 仍可启动，但不会转发出站流量
+    # - 示例：12D3KooWDxxxEcfm4ni81fhP8wxycZ8vcqQDR7F8Lx2hpZMRzJ17
+    peerid: ""
+
+
+# ===================== KK P2P（libp2p + Relay + mDNS + STUN + WebRTC 数据面） =====================
+# 说明：
+# - libp2p 负责控制面/信令/回落链路（TCP/Relay）。
+# - WebRTC DataChannel 作为优先数据面（UDP）：成功则 Chat/VPN 优先走 UDP，失败自动回落到 libp2p(TCP/Relay)。
 kk:
   p2p:
-    # 连接方式：
-    # - AUTO：有 multiaddr 就用；没有就仅用 PeerID（仅当本地已缓存到对端地址/PEX 已学习到时才可能成功）
-    # - MANUAL_ADDR：必须提供对方 multiaddr（推荐）
-    # - PEERID_ONLY：只用 PeerID（依赖缓存/发现能力）
-    connect:
-      mode: AUTO
-
-    # 拨号策略：直连优先，失败再尝试 /p2p-circuit（如果已学习到对端的 relay 地址）
     dial:
-      # 单个地址拨号超时（毫秒）
+      # 单个 multiaddr 的拨号超时（毫秒）
       perAddrTimeoutMs: 2500
-      # 整体拨号超时（毫秒）
+
+      # 一次拨号（包含多地址重试）的总超时（毫秒）
       totalTimeoutMs: 15000
+
       # 是否把“直连地址”排在“/p2p-circuit 地址”之前
       preferDirect: true
-      # 当拨号全部失败且启用了 relay 时，触发一次 relayReserveNow() 作为兜底准备
+
+      # 当拨号全部失败且已启用 relay 时，是否触发一次 relayReserveNow() 作为兜底准备
       triggerRelayReserveOnFail: true
 
     bootstrap:
-      # 是否在启动时尝试连接公网 bootstrap（可用于辅助连通/Identify；不等同于“能通过 PeerID 自动发现对端”）
+      # 是否在启动时尝试连接 bootstrap（用于辅助连通/Identify；不等同于“能用 PeerID 自动发现对端”）
       enabled: false
+
+      # 连接 bootstrap 的超时（秒）
       connectTimeoutSeconds: 8
-      # 逗号/换行分隔；为空则使用内置 DEFAULT_BOOTSTRAP
+
+      # bootstrap 地址列表（逗号/换行分隔）；为空则使用内置 DEFAULT_BOOTSTRAP
       addrs: ""
 
-    # 内网穿透（Relay v2 /p2p-circuit）
     relay:
+      # 是否启用 Relay v2（/p2p-circuit）作为内网穿透/兜底链路
       enabled: false
-      # CLIENT / HOP
+
+      # Relay 模式：
+      # - CLIENT：只作为客户端使用 relay（向 relay 预约并生成 /p2p-circuit 地址）
+      # - HOP：作为 relay 服务端（允许其他节点预约，并转发连接）
       mode: CLIENT
+
+      # 连接 relay 的超时（秒）
       connectTimeoutSeconds: 8
-      # 逗号/换行分隔：/ip4/.../tcp/.../p2p/...
+
+      # relay 节点地址列表（逗号/换行分隔），每个必须包含 /p2p/<relayPeerId>
+      # 示例：/ip4/1.2.3.4/tcp/4001/p2p/12D3KooW...
       addrs: ""
+
       hop:
+        # HOP 模式下允许并发预约/转发的上限（保护本机资源）
         concurrent: 128
 
-    # 发现机制：局域网自动发现（mDNS）
     discovery:
       mdns:
+        # 是否启用 mDNS 局域网发现（同一局域网内可自动发现对端地址）
         enabled: true
+
+        # mDNS 服务标签（通常无需改）
         serviceTag: _ipfs-discovery._udp.local.
+
+        # mDNS 查询间隔（秒）
         queryIntervalSeconds: 120
 
-    # NAT：提高直连成功率的手段
     nat:
-      # UPnP IGD 端口映射：家庭路由常见，能显著提高“对端直连到你”的概率（不是打洞，但很实用）
       upnp:
+        # 是否启用 UPnP IGD 端口映射（提高“公网直连到你”的概率；不是打洞，但很实用）
         enabled: false
-        # 映射租约（秒）。部分路由器会忽略。
+
+        # 映射租约（秒）；部分路由器会忽略
         leaseSeconds: 3600
+
         # 续约间隔（秒）
         renewIntervalSeconds: 900
 
-      # STUN：仅用于探测公网 UDP 映射（帮助判断网络环境；不保证用于 TCP 直连）
       stun:
+        # 是否启用 STUN 探测（仅用于探测公网 UDP 映射/辅助判断网络环境；不保证用于 TCP 直连）
         enabled: false
+
+        # STUN 服务器列表（逗号/换行分隔），形如：stun.l.google.com:19302
         servers: "stun.l.google.com:19302,stun1.l.google.com:19302"
+
+        # 单次 STUN 探测超时（毫秒）
         timeoutMs: 1500
 
-    # ICE/STUN/TURN：UDP 打洞（数据面优先走 UDP，失败再回落到 TCP/Relay）
-    ice:
+    webrtc:
+      # 是否启用 WebRTC 数据面（DataChannel + ICE/STUN/TURN）
       enabled: true
-      # Chat/VPN 是否优先走 ICE-UDP 数据面
+
       prefer:
+        # Chat 是否优先走 WebRTC-UDP（失败会自动回落到 libp2p）
         chat: true
+
+        # VPN 是否优先走 WebRTC-UDP（失败会自动回落到 libp2p）
         vpn: true
-      # 候选采集等待时间（毫秒）
-      gatherTimeoutMs: 2500
-      # 连接建立总超时（毫秒）
-      connectTimeoutMs: 9000
-      # ICE 本地 UDP 端口范围（0 表示由系统分配；建议在受控环境配置范围便于放行防火墙）
+
+      # WebRTC 建链总超时（毫秒）
+      connectTimeoutMs: 12000
+
       port:
+        # WebRTC 本地 UDP 端口范围：0 表示由系统分配；受控环境建议配置范围便于放行防火墙
         min: 0
         max: 0
+
       stun:
+        # WebRTC 使用的 STUN 服务器列表（逗号/换行分隔）
         servers: "stun.l.google.com:19302,stun1.l.google.com:19302"
-      # TURN 作为“最终兜底”（需要自建 coturn 或购买服务）
+
       turn:
+        # 是否启用 TURN（最终兜底：当严格 NAT/对称 NAT 导致直连失败时可能需要）
         enabled: false
-        # 逗号/换行分隔：
-        #   turn.example.com:3478|username|password
+
+        # TURN 服务器列表（逗号/换行分隔）：
+        # - 无账号：turn.example.com:3478
+        # - 带账号：turn.example.com:3478|username|password
         servers: ""
-
-
