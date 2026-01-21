@@ -3,6 +3,8 @@ package com.kk.p2p.engine;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import com.kk.p2p.ice.IceUdpSession;
+import com.kk.p2p.nat.UpnpIgdPortMapper;
 import com.kk.tunnel.vpn.service.WintunService;
 import io.libp2p.core.Connection;
 import io.libp2p.core.Host;
@@ -55,6 +57,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -83,9 +86,38 @@ public class Libp2pEngine {
     private static final String VPN_PROTOCOL_ID = "/kk-vpn/1.0.0";
     private static final String PEX_PROTOCOL_ID = "/kk/pex/1.0.0";
     private static final String CHAT_PROTOCOL_ID = "/kk-chat/1.0.0";
+    private static final String ICE_SIGNAL_PROTOCOL_ID = "/kk-ice-signal/1.0.0";
 
     private static final long ADDR_TTL_MS = TimeUnit.HOURS.toMillis(6);
     private static final int MAX_FRAME_SIZE = Integer.getInteger("kk.p2p.maxFrameSize", 1024 * 1024);
+
+    // -------------------- 拨号策略（直连优先，失败再尝试 /p2p-circuit） --------------------
+
+    /**
+     * 单个 multiaddr 的拨号超时（毫秒）。
+     * 值越小，“直连失败→回退 relay”越快，但弱网下可能误判。
+     */
+    @Value("${kk.p2p.dial.perAddrTimeoutMs:2500}")
+    private long dialPerAddrTimeoutMs;
+
+    /**
+     * 一次拨号（包含多地址重试）的总超时（毫秒）。
+     */
+    @Value("${kk.p2p.dial.totalTimeoutMs:15000}")
+    private long dialTotalTimeoutMs;
+
+    /**
+     * 是否把“直连地址”排在“/p2p-circuit 地址”之前。
+     */
+    @Value("${kk.p2p.dial.preferDirect:true}")
+    private boolean dialPreferDirect;
+
+    /**
+     * 当拨号全部失败且已启用 relay 时，是否触发一次 relayReserveNow() 作为兜底准备。
+     * 注意：它只能帮助“让别人更容易连到你”，不能凭空生成“对端的 relay 地址”。
+     */
+    @Value("${kk.p2p.dial.triggerRelayReserveOnFail:true}")
+    private boolean dialTriggerRelayReserveOnFail;
 
     private static final Path IDENTITY_KEY_PATH = Path.of(
             System.getProperty("user.home"), ".kk-platform", "p2p", "identity.key"
@@ -156,6 +188,9 @@ public class Libp2pEngine {
 
     private final ConcurrentHashMap<String, RelayReservation> relayReservations = new ConcurrentHashMap<>();
 
+    // 避免每次拨号失败都触发 relay 预约（只触发一次）
+    private final AtomicBoolean relayReserveTriggered = new AtomicBoolean(false);
+
     private static final class RelayReservation {
         final Multiaddr relayAddr; // must include /p2p/relayId
         final CircuitHopProtocol.HopController hopController;
@@ -183,6 +218,27 @@ public class Libp2pEngine {
     private final AtomicInteger mdnsPeersFound = new AtomicInteger(0);
     private volatile String lastMdnsPeer;
 
+    // -------------------- NAT 端口映射（UPnP IGD：提高公网直连成功率） --------------------
+
+    @Value("${kk.p2p.nat.upnp.enabled:false}")
+    private boolean upnpEnabled;
+
+    @Value("${kk.p2p.nat.upnp.leaseSeconds:3600}")
+    private int upnpLeaseSeconds;
+
+    @Value("${kk.p2p.nat.upnp.renewIntervalSeconds:900}")
+    private int upnpRenewIntervalSeconds;
+
+    private final AtomicInteger upnpAttempted = new AtomicInteger(0);
+    private final AtomicInteger upnpMapped = new AtomicInteger(0);
+    private volatile String upnpExternalIp;
+    private volatile String upnpLastError;
+    private volatile String upnpControlUrl;
+    private volatile String upnpServiceType;
+    private volatile Integer upnpMappedPort;
+
+    private final UpnpIgdPortMapper upnpPortMapper = new UpnpIgdPortMapper();
+
     // -------------------- STUN（仅用于探测公网 UDP 映射，辅助判断网络环境） --------------------
 
     @Value("${kk.p2p.nat.stun.enabled:false}")
@@ -204,6 +260,55 @@ public class Libp2pEngine {
 
     private final SecureRandom stunRandom = new SecureRandom();
 
+    // -------------------- ICE/STUN/TURN（UDP 打洞数据面，失败回落 TCP/Relay） --------------------
+
+    @Value("${kk.p2p.ice.enabled:false}")
+    private boolean iceEnabled;
+
+    @Value("${kk.p2p.ice.prefer.chat:true}")
+    private boolean icePreferChat;
+
+    @Value("${kk.p2p.ice.prefer.vpn:true}")
+    private boolean icePreferVpn;
+
+    /**
+     * 候选采集等待时间（毫秒）：越大越容易收集到 srflx/relay 候选，但首次发送更慢。
+     */
+    @Value("${kk.p2p.ice.gatherTimeoutMs:2500}")
+    private long iceGatherTimeoutMs;
+
+    /**
+     * ICE 连接建立总超时（毫秒）。
+     */
+    @Value("${kk.p2p.ice.connectTimeoutMs:9000}")
+    private long iceConnectTimeoutMs;
+
+    /**
+     * ICE 本地 UDP 端口范围（0 表示由系统分配）。
+     */
+    @Value("${kk.p2p.ice.port.min:0}")
+    private int icePortMin;
+
+    @Value("${kk.p2p.ice.port.max:0}")
+    private int icePortMax;
+
+    /**
+     * STUN 服务器（逗号/换行分隔），形如：stun.l.google.com:19302
+     */
+    @Value("${kk.p2p.ice.stun.servers:stun.l.google.com:19302,stun1.l.google.com:19302}")
+    private String iceStunServers;
+
+    @Value("${kk.p2p.ice.turn.enabled:false}")
+    private boolean iceTurnEnabled;
+
+    /**
+     * TURN 服务器（逗号/换行分隔）：
+     * - 无账号：turn.example.com:3478
+     * - 带账号：turn.example.com:3478|username|password
+     */
+    @Value("${kk.p2p.ice.turn.servers:}")
+    private String iceTurnServers;
+
     // 缓存已建立的 VPN 流，Key 为远端 PeerID 的 String
     private final ConcurrentHashMap<String, Stream> activeStreams = new ConcurrentHashMap<>();
 
@@ -215,6 +320,19 @@ public class Libp2pEngine {
 
     // 缓存已建立的 Chat 流，Key 为远端 PeerID 的 String
     private final ConcurrentHashMap<String, Stream> chatStreams = new ConcurrentHashMap<>();
+
+    // ICE 信令流（用于交换 offer/answer/candidates；数据面走 UDP）
+    private final ConcurrentHashMap<String, Stream> iceSignalStreams = new ConcurrentHashMap<>();
+
+    // ICE 会话（UDP 数据通道）
+    private final ConcurrentHashMap<String, IceNegotiation> iceNegotiations = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, IceUdpSession> iceSessions = new ConcurrentHashMap<>();
+
+    private static final class IceNegotiation {
+        final CompletableFuture<IceUdpSession> future = new CompletableFuture<>();
+        volatile IceUdpSession session;
+        volatile long startedAtMs;
+    }
 
     // Chat 消息回调：参数为 (fromPeerId, message)
     private volatile BiConsumer<String, String> chatMessageListener = (peerId, msg) -> {
@@ -295,6 +413,7 @@ public class Libp2pEngine {
                             circuitStopBinding,
                             circuitHopBinding,
                             createPexProtocolBinding(),
+                            createIceSignalProtocolBinding(),
                             createChatProtocolBinding(),
                             createVpnProtocolBinding()
                     )
@@ -304,6 +423,27 @@ public class Libp2pEngine {
 
             host.start().get();
             running.set(true);
+
+            // ICE-UDP 数据面回调：将收到的数据路由到 Chat/VPN
+            if (iceEnabled) {
+                initIceDispatcher();
+            } else {
+                log.info("ICE-UDP 已禁用（kk.p2p.ice.enabled=false）");
+            }
+
+            // 如果启用了虚拟 VPN，则在 P2P 启动后尝试拉起虚拟网卡（失败不阻断 P2P）
+            try {
+                wintunService.startIfEnabled();
+            } catch (Exception e) {
+                log.warn("VPN 未能自动启动: {}", (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
+            }
+
+            // UPnP 端口映射（提高公网直连成功率；失败则仍可用 relay 兜底）
+            if (upnpEnabled) {
+                startUpnpPortMapping();
+            } else {
+                log.info("UPnP 端口映射已禁用（kk.p2p.nat.upnp.enabled=false）");
+            }
 
             if (mdnsEnabled) {
                 startMdnsDiscovery();
@@ -762,6 +902,117 @@ public class Libp2pEngine {
         return null;
     }
 
+    private void startUpnpPortMapping() {
+        if (!upnpEnabled || host == null || !running.get()) {
+            return;
+        }
+
+        Integer port = detectTcpListenPort();
+        if (port == null || port <= 0) {
+            upnpLastError = "no tcp listen port";
+            return;
+        }
+
+        String internalIp = pickLanIpv4();
+        if (internalIp == null) {
+            upnpLastError = "no lan ipv4";
+            return;
+        }
+
+        upnpMappedPort = port;
+
+        // 异步执行并定时续约（不同路由器对 leaseSeconds 行为不同，续约是低成本兜底）
+        relayScheduler.execute(() -> upnpMapOnce(internalIp, port));
+
+        int renew = Math.max(60, upnpRenewIntervalSeconds);
+        relayScheduler.scheduleAtFixedRate(() -> upnpMapOnce(internalIp, port), renew, renew, TimeUnit.SECONDS);
+    }
+
+    private void upnpMapOnce(String internalIp, int port) {
+        if (!upnpEnabled || !running.get()) {
+            return;
+        }
+        upnpAttempted.incrementAndGet();
+
+        try {
+            String desc = "kk-p2p " + (selfPeerId == null ? "" : selfPeerId.toBase58());
+            UpnpIgdPortMapper.MapResult r = upnpPortMapper.mapTcp(internalIp, port, desc, Math.max(0, upnpLeaseSeconds));
+            if (r.success) {
+                upnpExternalIp = r.externalIp;
+                upnpControlUrl = r.igdControlUrl;
+                upnpServiceType = r.serviceType;
+                upnpLastError = null;
+                upnpMapped.set(1);
+                log.info("UPnP 端口映射成功: {}:{} -> {} (extIP={})", internalIp, port, port, (r.externalIp == null ? "-" : r.externalIp));
+            } else {
+                upnpLastError = r.message;
+                log.info("UPnP 端口映射失败: {}", r.message);
+            }
+        } catch (Exception e) {
+            upnpLastError = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            log.info("UPnP 端口映射异常: {}", upnpLastError);
+        }
+    }
+
+    private Integer detectTcpListenPort() {
+        if (host == null) {
+            return null;
+        }
+        for (Multiaddr a : host.listenAddresses()) {
+            if (a == null) {
+                continue;
+            }
+            Integer p = extractTcpPort(a.toString());
+            if (p != null && p > 0) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    private static String pickLanIpv4() {
+        // 选择一个可用于内网映射的 IPv4（非 loopback/link-local）
+        List<String> ips = getLocalIpv4Candidates();
+        for (String ip : ips) {
+            if (ip == null) {
+                continue;
+            }
+            String v = ip.trim();
+            if (v.isBlank()) {
+                continue;
+            }
+            if (v.startsWith("127.")) {
+                continue;
+            }
+            return v;
+        }
+        return null;
+    }
+
+    public boolean isUpnpEnabled() {
+        return upnpEnabled;
+    }
+
+    public int getUpnpAttempted() {
+        return upnpAttempted.get();
+    }
+
+    public int getUpnpMapped() {
+        return upnpMapped.get();
+    }
+
+    public String getUpnpExternalIp() {
+        return upnpExternalIp;
+    }
+
+    public String getUpnpLastError() {
+        return upnpLastError;
+    }
+
+    public Integer getUpnpMappedPort() {
+        return upnpMappedPort;
+    }
+
     public void relayReserveNow() {
 
         if (!relayEnabled || host == null || !running.get()) {
@@ -986,6 +1237,535 @@ public class Libp2pEngine {
         };
     }
 
+
+
+    // -------------------- ICE 信令（通过 libp2p 交换 offer/answer/candidates）--------------------
+
+    private void initIceDispatcher() {
+        IceUdpSession.IceUdpSessionCallbacks.setDispatcher((fromPeerId, type, payload) -> {
+            if (type == null) {
+                return;
+            }
+            byte t = type;
+
+            if (t == IceUdpSession.TYPE_CHAT) {
+                String msg = new String(payload == null ? new byte[0] : payload, StandardCharsets.UTF_8);
+                BiConsumer<String, String> listener = chatMessageListener;
+                if (listener != null) {
+                    listener.accept(fromPeerId, msg);
+                }
+                return;
+            }
+
+            if (t == IceUdpSession.TYPE_VPN) {
+                if (payload != null && payload.length > 0) {
+                    vpnRxBytesTotal.addAndGet(payload.length);
+                    try {
+                        wintunService.writeToTun(payload);
+                    } catch (Exception e) {
+                        log.debug("ICE-UDP 写入 TUN 失败: {}", (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
+                    }
+                }
+            }
+        });
+
+        // 简单 keepalive：让 NAT 映射更稳定（即使没有业务流量）
+        relayScheduler.scheduleAtFixedRate(() -> {
+            if (!iceEnabled || !running.get()) {
+                return;
+            }
+            for (IceUdpSession s : iceSessions.values()) {
+                if (s == null || !s.isEstablished()) {
+                    continue;
+                }
+                try {
+                    s.sendPing();
+                } catch (Exception ignore) {
+                }
+            }
+        }, 5, 15, TimeUnit.SECONDS);
+    }
+
+    private ProtocolBinding<IceSignalController> createIceSignalProtocolBinding() {
+        return new ProtocolBinding<IceSignalController>() {
+            @NotNull
+            @Override
+            public ProtocolDescriptor getProtocolDescriptor() {
+                return new ProtocolDescriptor(ICE_SIGNAL_PROTOCOL_ID);
+            }
+
+            @NotNull
+            @Override
+            public CompletableFuture<IceSignalController> initChannel(@NotNull P2PChannel ch, @NotNull String selectedProtocol) {
+                Stream stream = (Stream) ch;
+                handleIncomingIceSignalStream(stream);
+                return CompletableFuture.completedFuture(new IceSignalController(stream));
+            }
+        };
+    }
+
+    public static final class IceSignalController {
+        public final Stream stream;
+
+        public IceSignalController(Stream stream) {
+            this.stream = stream;
+        }
+    }
+
+    private void handleIncomingIceSignalStream(Stream stream) {
+        String remotePeerId = stream.remotePeerId().toBase58();
+
+        iceSignalStreams.put(remotePeerId, stream);
+        stream.closeFuture().thenRun(() -> iceSignalStreams.remove(remotePeerId));
+
+        stream.pushHandler(new FramedInboundHandler(MAX_FRAME_SIZE, frame -> {
+            String json = frame.toString(StandardCharsets.UTF_8);
+            onIceSignal(remotePeerId, json, stream);
+        }, (ctx, cause) -> {
+            log.debug("ICE 信令流异常: {} {}", remotePeerId, (cause == null ? "unknown" : cause.toString()));
+            ctx.close();
+        }));
+    }
+
+    private void onIceSignal(String remotePeerId, String json, Stream signalStream) {
+        if (!iceEnabled || remotePeerId == null || remotePeerId.isBlank() || json == null || json.isBlank()) {
+            return;
+        }
+
+        try {
+            JSONObject obj = JSONUtil.parseObj(json);
+            String t = obj.getStr("t");
+            if (t == null) {
+                return;
+            }
+
+            String type = t.trim().toLowerCase();
+            switch (type) {
+                case "offer" -> handleIceOffer(remotePeerId, obj, signalStream);
+                case "answer" -> handleIceAnswer(remotePeerId, obj);
+                default -> {
+                }
+            }
+        } catch (Exception e) {
+            log.debug("ICE 信令解析失败: {} {}", remotePeerId, e.toString());
+        }
+    }
+
+    private void handleIceOffer(String remotePeerId, JSONObject offer, Stream signalStream) {
+        if (!iceEnabled || !running.get()) {
+            return;
+        }
+
+        String ufrag = offer.getStr("ufrag");
+        String pwd = offer.getStr("pwd");
+        String nonceB64 = offer.getStr("nonce");
+        JSONArray arr = offer.getJSONArray("cands");
+
+        if (ufrag == null || ufrag.isBlank() || pwd == null || pwd.isBlank() || nonceB64 == null || nonceB64.isBlank()) {
+            return;
+        }
+
+        byte[] nonce;
+        try {
+            nonce = IceUdpSession.b64d(nonceB64.trim());
+        } catch (Exception e) {
+            return;
+        }
+
+        List<String> remoteCands = new ArrayList<>();
+        if (arr != null) {
+            for (int i = 0; i < arr.size(); i++) {
+                String s = Objects.toString(arr.get(i), "");
+                if (!s.isBlank()) {
+                    remoteCands.add(s);
+                }
+            }
+        }
+
+        IceNegotiation neg = iceNegotiations.computeIfAbsent(remotePeerId, k -> {
+            IceNegotiation n = new IceNegotiation();
+            n.startedAtMs = System.currentTimeMillis();
+            return n;
+        });
+
+        // 若已建立则忽略
+        IceUdpSession existing = iceSessions.get(remotePeerId);
+        if (existing != null && existing.isEstablished()) {
+            return;
+        }
+
+        // 若本地正在发起，收到 offer：以“较新的一次”覆盖（简单处理 glare）
+        if (neg.future.isDone()) {
+            iceNegotiations.remove(remotePeerId);
+            neg = iceNegotiations.computeIfAbsent(remotePeerId, k -> {
+                IceNegotiation n = new IceNegotiation();
+                n.startedAtMs = System.currentTimeMillis();
+                return n;
+            });
+        }
+
+        try {
+            boolean controlling = isIceControllingFor(remotePeerId);
+            byte[] key = deriveIceKey32(remotePeerId, nonce);
+
+            IceUdpSession session = IceUdpSession.create(buildIceConfig(), remotePeerId, controlling, key);
+            neg.session = session;
+
+            session.applyRemote(ufrag.trim(), pwd.trim(), remoteCands);
+
+            IceNegotiation negRef = neg;
+
+            // 等待候选采集，然后回 answer 并开始 checks
+            relayScheduler.execute(() -> {
+                try {
+                    Thread.sleep(Math.max(0, iceGatherTimeoutMs));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+
+                try {
+                    sendIceAnswer(signalStream, session, nonceB64.trim());
+                } catch (Exception ignore) {
+                }
+
+                session.start(iceConnectTimeoutMs)
+                        .thenRun(() -> onIceEstablished(remotePeerId, negRef, session))
+                        .exceptionally(ex -> {
+                            onIceFailed(remotePeerId, negRef, session, ex);
+                            return null;
+                        });
+            });
+
+        } catch (Exception e) {
+            neg.future.completeExceptionally(e);
+        }
+    }
+
+    private void handleIceAnswer(String remotePeerId, JSONObject answer) {
+        if (!iceEnabled || !running.get()) {
+            return;
+        }
+
+        IceNegotiation neg = iceNegotiations.get(remotePeerId);
+        if (neg == null || neg.future.isDone()) {
+            return;
+        }
+
+        IceUdpSession session = neg.session;
+        if (session == null) {
+            return;
+        }
+
+        String ufrag = answer.getStr("ufrag");
+        String pwd = answer.getStr("pwd");
+        JSONArray arr = answer.getJSONArray("cands");
+
+        if (ufrag == null || ufrag.isBlank() || pwd == null || pwd.isBlank()) {
+            return;
+        }
+
+        List<String> remoteCands = new ArrayList<>();
+        if (arr != null) {
+            for (int i = 0; i < arr.size(); i++) {
+                String s = Objects.toString(arr.get(i), "");
+                if (!s.isBlank()) {
+                    remoteCands.add(s);
+                }
+            }
+        }
+
+        try {
+            session.applyRemote(ufrag.trim(), pwd.trim(), remoteCands);
+        } catch (Exception e) {
+            onIceFailed(remotePeerId, neg, session, e);
+            return;
+        }
+
+        session.start(iceConnectTimeoutMs)
+                .thenRun(() -> onIceEstablished(remotePeerId, neg, session))
+                .exceptionally(ex -> {
+                    onIceFailed(remotePeerId, neg, session, ex);
+                    return null;
+                });
+    }
+
+    private void onIceEstablished(String peerId, IceNegotiation neg, IceUdpSession session) {
+        iceSessions.put(peerId, session);
+        neg.future.complete(session);
+    }
+
+    private void onIceFailed(String peerId, IceNegotiation neg, IceUdpSession session, Throwable ex) {
+        try {
+            if (session != null) {
+                session.close();
+            }
+        } catch (Exception ignore) {
+        }
+        if (!neg.future.isDone()) {
+            neg.future.completeExceptionally(ex == null ? new IllegalStateException("ice failed") : ex);
+        }
+        iceNegotiations.remove(peerId);
+    }
+
+    private void sendIceOffer(Stream stream, IceUdpSession session, String nonceB64) {
+        JSONObject obj = new JSONObject();
+        obj.set("t", "offer");
+        obj.set("ufrag", session.getLocalUfrag());
+        obj.set("pwd", session.getLocalPassword());
+        obj.set("nonce", nonceB64);
+
+        JSONArray cands = new JSONArray();
+        for (String c : session.getLocalCandidateLines()) {
+            cands.add(c);
+        }
+        obj.set("cands", cands);
+
+        stream.writeAndFlush(frame(obj.toString().getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private void sendIceAnswer(Stream stream, IceUdpSession session, String nonceB64) {
+        JSONObject obj = new JSONObject();
+        obj.set("t", "answer");
+        obj.set("ufrag", session.getLocalUfrag());
+        obj.set("pwd", session.getLocalPassword());
+        obj.set("nonce", nonceB64);
+
+        JSONArray cands = new JSONArray();
+        for (String c : session.getLocalCandidateLines()) {
+            cands.add(c);
+        }
+        obj.set("cands", cands);
+
+        stream.writeAndFlush(frame(obj.toString().getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private CompletableFuture<IceUdpSession> ensureIceSession(String peerIdStr) {
+        if (!iceEnabled) {
+            return CompletableFuture.failedFuture(new IllegalStateException("ice disabled"));
+        }
+        if (!running.get() || host == null) {
+            return CompletableFuture.failedFuture(new IllegalStateException("engine is not running"));
+        }
+
+        IceUdpSession existing = iceSessions.get(peerIdStr);
+        if (existing != null && existing.isEstablished()) {
+            return CompletableFuture.completedFuture(existing);
+        }
+
+        IceNegotiation ongoing = iceNegotiations.get(peerIdStr);
+        if (ongoing != null && !ongoing.future.isDone()) {
+            return ongoing.future;
+        }
+
+        IceNegotiation neg = new IceNegotiation();
+        neg.startedAtMs = System.currentTimeMillis();
+        IceNegotiation prev = iceNegotiations.put(peerIdStr, neg);
+        if (prev != null && !prev.future.isDone()) {
+            // 有其他线程先发起了
+            iceNegotiations.put(peerIdStr, prev);
+            return prev.future;
+        }
+
+        startIceAsInitiator(peerIdStr, neg);
+
+        long totalTimeout = Math.max(2000, iceGatherTimeoutMs + iceConnectTimeoutMs + 2000);
+        relayScheduler.schedule(() -> {
+            if (!neg.future.isDone()) {
+                onIceFailed(peerIdStr, neg, neg.session, new IllegalStateException("ice negotiation timeout"));
+            }
+        }, totalTimeout, TimeUnit.MILLISECONDS);
+
+        return neg.future;
+    }
+
+    private void triggerIceNegotiationAsync(String peerIdStr) {
+        if (!iceEnabled || !running.get()) {
+            return;
+        }
+        ensureIceSession(peerIdStr).exceptionally(ex -> null);
+    }
+
+    private void startIceAsInitiator(String peerIdStr, IceNegotiation neg) {
+        openIceSignalStream(peerIdStr)
+                .thenAccept(stream -> {
+                    try {
+                        byte[] nonce = new byte[16];
+                        new SecureRandom().nextBytes(nonce);
+                        String nonceB64 = IceUdpSession.b64(nonce);
+
+                        boolean controlling = isIceControllingFor(peerIdStr);
+                        byte[] key = deriveIceKey32(peerIdStr, nonce);
+
+                        IceUdpSession session = IceUdpSession.create(buildIceConfig(), peerIdStr, controlling, key);
+                        neg.session = session;
+
+                        relayScheduler.execute(() -> {
+                            try {
+                                Thread.sleep(Math.max(0, iceGatherTimeoutMs));
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            }
+
+                            try {
+                                sendIceOffer(stream, session, nonceB64);
+                            } catch (Exception e) {
+                                onIceFailed(peerIdStr, neg, session, e);
+                            }
+                        });
+
+                    } catch (Exception e) {
+                        onIceFailed(peerIdStr, neg, null, e);
+                    }
+                })
+                .exceptionally(ex -> {
+                    onIceFailed(peerIdStr, neg, null, ex);
+                    return null;
+                });
+    }
+
+    private CompletableFuture<Stream> openIceSignalStream(String peerIdStr) {
+        Stream existing = iceSignalStreams.get(peerIdStr);
+        if (existing != null) {
+            return CompletableFuture.completedFuture(existing);
+        }
+
+        final PeerId peerId;
+        try {
+            peerId = PeerId.fromBase58(peerIdStr);
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid peerId", e));
+        }
+
+        return resolvePeerAddrs(peerIdStr, peerId)
+                .thenCompose(addrs -> {
+                    if (addrs.isEmpty()) {
+                        return CompletableFuture.failedFuture(new IllegalStateException("no known multiaddrs for peer"));
+                    }
+                    return connectFirst(peerId, addrs, 0);
+                })
+                .thenCompose(conn -> {
+                    tryOpenPex(conn);
+                    return conn.muxerSession()
+                            .createStream(createIceSignalProtocolBinding())
+                            .getController();
+                })
+                .thenApply(controller -> {
+                    Stream s = controller.stream;
+                    iceSignalStreams.put(peerIdStr, s);
+                    s.closeFuture().thenRun(() -> iceSignalStreams.remove(peerIdStr));
+                    return s;
+                });
+    }
+
+    private boolean isIceControllingFor(String remotePeerId) {
+        String self = getSelfPeerId();
+        if (self == null || self.isBlank() || remotePeerId == null || remotePeerId.isBlank()) {
+            return true;
+        }
+        // 使用确定性规则避免 glare：两端对比 PeerID 字符串，较大的作为 controlling
+        return self.compareTo(remotePeerId) > 0;
+    }
+
+    private byte[] deriveIceKey32(String remotePeerId, byte[] nonce) {
+        try {
+            String self = getSelfPeerId();
+            String a = (self == null ? "" : self);
+            String b = (remotePeerId == null ? "" : remotePeerId);
+            String lo = a.compareTo(b) <= 0 ? a : b;
+            String hi = a.compareTo(b) <= 0 ? b : a;
+
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            md.update("kk-ice|".getBytes(StandardCharsets.UTF_8));
+            md.update(lo.getBytes(StandardCharsets.UTF_8));
+            md.update((byte) '|');
+            md.update(hi.getBytes(StandardCharsets.UTF_8));
+            md.update((byte) '|');
+            md.update(nonce == null ? new byte[0] : nonce);
+            return md.digest();
+        } catch (Exception e) {
+            // 兜底：随机 key（不推荐，但避免直接崩）
+            return IceUdpSession.newAesKey32();
+        }
+    }
+
+    private IceUdpSession.Config buildIceConfig() {
+        IceUdpSession.Config cfg = new IceUdpSession.Config();
+        cfg.minPort = Math.max(0, icePortMin);
+        cfg.maxPort = Math.max(0, icePortMax);
+
+        cfg.enableStun = true;
+        cfg.stunServers = new ArrayList<>();
+        for (InetSocketAddress s : parseStunServers(iceStunServers)) {
+            if (s == null) {
+                continue;
+            }
+            String host = s.getHostString();
+            int port = s.getPort();
+            if (host != null && !host.isBlank() && port > 0) {
+                cfg.stunServers.add(new IceUdpSession.Config.Server(host, port));
+            }
+        }
+
+        cfg.enableTurn = iceTurnEnabled;
+        cfg.turnServers = parseTurnServers(iceTurnServers);
+
+        return cfg;
+    }
+
+    private static List<IceUdpSession.Config.TurnServer> parseTurnServers(String servers) {
+        String s = servers == null ? "" : servers.trim();
+        if (s.isBlank()) {
+            return List.of();
+        }
+
+        String[] parts = s.split("[\\r\\n,]+");
+        List<IceUdpSession.Config.TurnServer> out = new ArrayList<>();
+
+        for (String p : parts) {
+            String v = p == null ? "" : p.trim();
+            if (v.isBlank()) {
+                continue;
+            }
+
+            // 格式：host:port|user|pass
+            String hostPort = v;
+            String user = null;
+            String pass = null;
+
+            String[] up = v.split("\\|");
+            if (up.length >= 1) {
+                hostPort = up[0].trim();
+            }
+            if (up.length >= 2) {
+                user = up[1].trim();
+            }
+            if (up.length >= 3) {
+                pass = up[2].trim();
+            }
+
+            String host;
+            int port;
+            int idx = hostPort.lastIndexOf(':');
+            if (idx > 0 && idx < hostPort.length() - 1) {
+                host = hostPort.substring(0, idx).trim();
+                try {
+                    port = Integer.parseInt(hostPort.substring(idx + 1).trim());
+                } catch (Exception e) {
+                    port = 3478;
+                }
+            } else {
+                host = hostPort.trim();
+                port = 3478;
+            }
+
+            if (!host.isBlank()) {
+                out.add(new IceUdpSession.Config.TurnServer(host, port, user, pass));
+            }
+        }
+
+        return out;
+    }
+
     private ProtocolBinding<ChatController> createChatProtocolBinding() {
         return new ProtocolBinding<ChatController>() {
             @NotNull
@@ -1088,6 +1868,11 @@ public class Libp2pEngine {
                 .thenAccept(controller -> {
                     chatStreams.put(peerIdStr, controller.stream);
                     controller.stream.closeFuture().thenRun(() -> chatStreams.remove(peerIdStr));
+                })
+                .orTimeout(Math.max(1000, dialTotalTimeoutMs), TimeUnit.MILLISECONDS)
+                .exceptionallyCompose(ex -> {
+                    maybeTriggerRelayReserveFallback();
+                    return CompletableFuture.failedFuture(ex);
                 });
     }
 
@@ -1099,6 +1884,23 @@ public class Libp2pEngine {
             return CompletableFuture.failedFuture(new IllegalArgumentException("targetPeerId is blank"));
         }
 
+        String msg = (message == null ? "" : message);
+
+        // 发送优先：ICE-UDP（打洞成功后走 UDP 数据面），失败再回落到 libp2p(TCP/Relay)
+        if (iceEnabled && icePreferChat) {
+            return sendChatMessageViaIce(targetPeerIdStr, msg)
+                    .exceptionallyCompose(ex -> sendChatMessageOverLibp2p(targetPeerIdStr, msg));
+        }
+
+        return sendChatMessageOverLibp2p(targetPeerIdStr, msg);
+    }
+
+    private CompletableFuture<Void> sendChatMessageViaIce(String targetPeerIdStr, String msg) {
+        return ensureIceSession(targetPeerIdStr)
+                .thenAccept(sess -> sess.sendChat(msg));
+    }
+
+    private CompletableFuture<Void> sendChatMessageOverLibp2p(String targetPeerIdStr, String message) {
         byte[] payload = (message == null ? "" : message).getBytes(StandardCharsets.UTF_8);
 
         Stream stream = chatStreams.get(targetPeerIdStr);
@@ -1139,6 +1941,11 @@ public class Libp2pEngine {
                     chatStreams.put(targetPeerIdStr, controller.stream);
                     controller.stream.closeFuture().thenRun(() -> chatStreams.remove(targetPeerIdStr));
                     controller.stream.writeAndFlush(frame(payload));
+                })
+                .orTimeout(Math.max(1000, dialTotalTimeoutMs), TimeUnit.MILLISECONDS)
+                .exceptionallyCompose(ex -> {
+                    maybeTriggerRelayReserveFallback();
+                    return CompletableFuture.failedFuture(ex);
                 });
     }
 
@@ -1413,6 +2220,22 @@ public class Libp2pEngine {
             return;
         }
 
+        // 发送优先：ICE-UDP（打洞成功后走 UDP 数据面），失败再回落到 libp2p(TCP/Relay)
+        if (iceEnabled && icePreferVpn) {
+            IceUdpSession s = iceSessions.get(targetPeerId);
+            if (s != null && s.isEstablished()) {
+                try {
+                    s.sendVpnPacket(packetData);
+                    vpnTxBytesTotal.addAndGet(packetData.length);
+                    return;
+                } catch (Exception ignore) {
+                }
+            } else {
+                // 触发后台打洞（不阻塞当前包），后续包优先走 UDP
+                triggerIceNegotiationAsync(targetPeerId);
+            }
+        }
+
         vpnTxBytesTotal.addAndGet(packetData.length);
 
         Stream stream = activeStreams.get(targetPeerId);
@@ -1560,7 +2383,9 @@ public class Libp2pEngine {
                     controller.stream.closeFuture().thenRun(() -> activeStreams.remove(targetPeerIdStr));
                     controller.stream.writeAndFlush(frame(packetData));
                 })
+                .orTimeout(Math.max(1000, dialTotalTimeoutMs), TimeUnit.MILLISECONDS)
                 .exceptionally(ex -> {
+                    maybeTriggerRelayReserveFallback();
                     log.warn("拨号并发送失败: {}", targetPeerIdStr, ex);
                     return null;
                 });
@@ -1569,35 +2394,109 @@ public class Libp2pEngine {
     private CompletableFuture<List<Multiaddr>> resolvePeerAddrs(String peerIdStr, PeerId peerId) {
         List<Multiaddr> cached = peerAddrCache.get(peerIdStr);
         if (cached != null && !cached.isEmpty()) {
-            return CompletableFuture.completedFuture(cached);
+            return CompletableFuture.completedFuture(normalizeDialAddrs(cached));
         }
         return host.getAddressBook()
                 .getAddrs(peerId)
                 .orTimeout(3, TimeUnit.SECONDS)
                 .exceptionally(ex -> List.of())
                 .thenApply(addrs -> {
+                    List<Multiaddr> list;
                     if (addrs instanceof List) {
                         // noinspection unchecked
-                        return (List<Multiaddr>) addrs;
+                        list = (List<Multiaddr>) addrs;
+                    } else {
+                        list = new ArrayList<>(addrs);
                     }
-                    return new ArrayList<>(addrs);
+                    return normalizeDialAddrs(list);
                 });
     }
 
+    /**
+     * 归一化拨号地址列表：
+     * 1) 过滤掉通配/不可拨号地址
+     * 2) 去重
+     * 3) 直连地址优先，/p2p-circuit 在后
+     */
+    private List<Multiaddr> normalizeDialAddrs(List<Multiaddr> addrs) {
+        if (addrs == null || addrs.isEmpty()) {
+            return List.of();
+        }
+
+        List<Multiaddr> filtered = new ArrayList<>(addrs.size());
+        for (Multiaddr a : addrs) {
+            if (a == null) {
+                continue;
+            }
+            try {
+                validateDialableAddr(a);
+                filtered.add(a);
+            } catch (IllegalArgumentException ignore) {
+            }
+        }
+
+        if (filtered.isEmpty()) {
+            return List.of();
+        }
+
+        List<Multiaddr> uniq = new ArrayList<>(filtered.size());
+        HashSet<String> seen = new HashSet<>();
+        for (Multiaddr a : filtered) {
+            String s = a.toString();
+            if (seen.add(s)) {
+                uniq.add(a);
+            }
+        }
+
+        if (!dialPreferDirect || uniq.size() <= 1) {
+            return uniq;
+        }
+
+        List<Multiaddr> direct = new ArrayList<>(uniq.size());
+        List<Multiaddr> relay = new ArrayList<>(uniq.size());
+        for (Multiaddr a : uniq) {
+            String s = a.toString();
+            if (s.contains("/p2p-circuit")) {
+                relay.add(a);
+            } else {
+                direct.add(a);
+            }
+        }
+        direct.addAll(relay);
+        return direct;
+    }
+
+    private void maybeTriggerRelayReserveFallback() {
+        if (!dialTriggerRelayReserveOnFail || !relayEnabled || host == null || !running.get()) {
+            return;
+        }
+        if (!relayReservations.isEmpty()) {
+            return;
+        }
+        if (relayReserveTriggered.compareAndSet(false, true)) {
+            log.info("拨号全部失败，触发一次 relay 预约兜底（帮助他人通过 /p2p-circuit 连接到你）");
+            relayReserveNow();
+        }
+    }
+
     private CompletableFuture<Connection> connectFirst(PeerId peerId, List<Multiaddr> addrs, int idx) {
-        if (idx >= addrs.size()) {
+        if (addrs == null || idx >= addrs.size()) {
             return CompletableFuture.failedFuture(new IllegalStateException("all dial attempts failed"));
         }
 
         Multiaddr a = addrs.get(idx);
-        CompletableFuture<Connection> attempt = host.getNetwork().connect(peerId, a);
-        return attempt.handle((conn, ex) -> {
-            if (ex == null) {
-                return CompletableFuture.completedFuture(conn);
-            }
-            log.debug("拨号失败，尝试下一个地址: {} -> {}", a, ex.toString());
-            return connectFirst(peerId, addrs, idx + 1);
-        }).thenCompose(f -> f);
+        long perAddrTimeout = Math.max(200, dialPerAddrTimeoutMs);
+
+        return host.getNetwork().connect(peerId, a)
+                .orTimeout(perAddrTimeout, TimeUnit.MILLISECONDS)
+                .handle((conn, ex) -> {
+                    if (ex == null) {
+                        return CompletableFuture.completedFuture(conn);
+                    }
+                    log.debug("拨号失败，尝试下一个地址: {} -> {}", a, (ex.getMessage() == null ? ex.toString() : ex.getMessage()));
+                    return connectFirst(peerId, addrs, idx + 1);
+                })
+                .thenCompose(f -> f);
     }
 
     /**
@@ -1689,6 +2588,15 @@ public class Libp2pEngine {
         chatStreams.clear();
 
         stopMdnsDiscovery();
+
+        // 尽力清理 UPnP 端口映射（不保证所有路由器支持 DeletePortMapping）
+        try {
+            Integer p = upnpMappedPort;
+            if (p != null && upnpControlUrl != null && upnpServiceType != null) {
+                upnpPortMapper.deleteTcpMapping(upnpControlUrl, upnpServiceType, p);
+            }
+        } catch (Exception ignore) {
+        }
 
         relayReservations.clear();
 

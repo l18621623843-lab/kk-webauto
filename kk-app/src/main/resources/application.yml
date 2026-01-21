@@ -40,9 +40,12 @@ automation:
     retry-times: 1
 
 vpn:
+  # 是否启用虚拟 VPN（Windows/Wintun）。开启通常需要管理员权限。
+  enabled: false
   ip:
     address: 10.8.0.3
     mask: 255.255.255.0
+  # 目标 PeerID（把虚拟网卡流量发给谁）
 #  target:
 #    peerid: 12D3KooWDxxxEcfm4ni81fhP8wxycZ8vcqQDR7F8Lx2hpZMRzJ17
 
@@ -54,6 +57,18 @@ kk:
     # - PEERID_ONLY：只用 PeerID（依赖缓存/发现能力）
     connect:
       mode: AUTO
+
+    # 拨号策略：直连优先，失败再尝试 /p2p-circuit（如果已学习到对端的 relay 地址）
+    dial:
+      # 单个地址拨号超时（毫秒）
+      perAddrTimeoutMs: 2500
+      # 整体拨号超时（毫秒）
+      totalTimeoutMs: 15000
+      # 是否把“直连地址”排在“/p2p-circuit 地址”之前
+      preferDirect: true
+      # 当拨号全部失败且启用了 relay 时，触发一次 relayReserveNow() 作为兜底准备
+      triggerRelayReserveOnFail: true
+
     bootstrap:
       # 是否在启动时尝试连接公网 bootstrap（可用于辅助连通/Identify；不等同于“能通过 PeerID 自动发现对端”）
       enabled: false
@@ -79,10 +94,44 @@ kk:
         serviceTag: _ipfs-discovery._udp.local.
         queryIntervalSeconds: 120
 
-    # NAT/STUN：仅用于探测公网 UDP 映射（帮助判断网络环境；不保证用于 TCP 直连）
+    # NAT：提高直连成功率的手段
     nat:
+      # UPnP IGD 端口映射：家庭路由常见，能显著提高“对端直连到你”的概率（不是打洞，但很实用）
+      upnp:
+        enabled: false
+        # 映射租约（秒）。部分路由器会忽略。
+        leaseSeconds: 3600
+        # 续约间隔（秒）
+        renewIntervalSeconds: 900
+
+      # STUN：仅用于探测公网 UDP 映射（帮助判断网络环境；不保证用于 TCP 直连）
       stun:
         enabled: false
         servers: "stun.l.google.com:19302,stun1.l.google.com:19302"
         timeoutMs: 1500
+
+    # ICE/STUN/TURN：UDP 打洞（数据面优先走 UDP，失败再回落到 TCP/Relay）
+    ice:
+      enabled: true
+      # Chat/VPN 是否优先走 ICE-UDP 数据面
+      prefer:
+        chat: true
+        vpn: true
+      # 候选采集等待时间（毫秒）
+      gatherTimeoutMs: 2500
+      # 连接建立总超时（毫秒）
+      connectTimeoutMs: 9000
+      # ICE 本地 UDP 端口范围（0 表示由系统分配；建议在受控环境配置范围便于放行防火墙）
+      port:
+        min: 0
+        max: 0
+      stun:
+        servers: "stun.l.google.com:19302,stun1.l.google.com:19302"
+      # TURN 作为“最终兜底”（需要自建 coturn 或购买服务）
+      turn:
+        enabled: false
+        # 逗号/换行分隔：
+        #   turn.example.com:3478|username|password
+        servers: ""
+
 

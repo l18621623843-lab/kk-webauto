@@ -50,5 +50,12 @@
             <artifactId>jna-platform</artifactId>
             <version>${jna.version}</version>
         </dependency>
+
+        <!-- ICE/STUN/TURN (UDP 打洞)：优先让数据面走 UDP，失败再回落到 libp2p(TCP/Relay) -->
+        <dependency>
+            <groupId>org.jitsi</groupId>
+            <artifactId>ice4j</artifactId>
+            <version>3.2-12-gc2cbf61</version>
+        </dependency>
     </dependencies>
 </project>

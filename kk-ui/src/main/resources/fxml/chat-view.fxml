@@ -7,99 +7,186 @@
 <BorderPane xmlns="http://javafx.com/javafx"
             xmlns:fx="http://javafx.com/fxml"
             fx:controller="com.kk.ui.controller.ChatController"
-            prefHeight="650.0" prefWidth="900.0">
+            prefHeight="650.0" prefWidth="980.0">
 
     <top>
-        <VBox spacing="8">
+        <HBox spacing="10" alignment="CENTER_LEFT">
             <padding>
-                <Insets top="10" right="10" bottom="10" left="10"/>
+                <Insets top="10" right="10" bottom="8" left="10"/>
             </padding>
 
-            <GridPane hgap="10" vgap="8">
-                <columnConstraints>
-                    <ColumnConstraints percentWidth="18"/>
-                    <ColumnConstraints percentWidth="62"/>
-                    <ColumnConstraints percentWidth="20"/>
-                </columnConstraints>
+            <Label text="本机 PeerID:" />
+            <TextField fx:id="selfPeerIdField" editable="false" HBox.hgrow="ALWAYS" />
+            <Button text="复制" onAction="#handleCopySelfPeerId" />
 
-                <Label text="本机 PeerID:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
-                <TextField fx:id="selfPeerIdField" editable="false" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
-                <Button text="复制" onAction="#handleCopySelfPeerId" GridPane.rowIndex="0" GridPane.columnIndex="2"/>
+            <Separator orientation="VERTICAL" />
 
-                <Label text="对方 PeerID:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
-                <TextField fx:id="remotePeerIdField" promptText="输入对方 PeerID" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
-                <Button text="连接" onAction="#handleConnect" GridPane.rowIndex="1" GridPane.columnIndex="2"/>
-
-                <Label text="对方地址:" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
-                <TextField fx:id="remoteMultiaddrField" promptText="可选：/ip4/.../tcp/.../p2p/..." GridPane.rowIndex="2" GridPane.columnIndex="1"/>
-                <Label fx:id="statusLabel" text="未连接" GridPane.rowIndex="2" GridPane.columnIndex="2"/>
-
-                <Label text="连接方式:" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
-                <ComboBox fx:id="connectModeCombo" GridPane.rowIndex="3" GridPane.columnIndex="1" maxWidth="Infinity"/>
-                <Button text="Bootstrap" onAction="#handleBootstrapNow" GridPane.rowIndex="3" GridPane.columnIndex="2"/>
-
-                <Label text="Bootstrap状态:" GridPane.rowIndex="4" GridPane.columnIndex="0"/>
-                <Label fx:id="bootstrapStatusLabel" text="-" GridPane.rowIndex="4" GridPane.columnIndex="1"/>
-                <Button text="刷新" onAction="#handleRefreshBootstrap" GridPane.rowIndex="4" GridPane.columnIndex="2"/>
-
-                <Label text="公网(Google):" GridPane.rowIndex="5" GridPane.columnIndex="0"/>
-                <Label fx:id="googleStatusLabel" text="未检测" GridPane.rowIndex="5" GridPane.columnIndex="1"/>
-                <Button text="检测" onAction="#handleCheckGoogle" GridPane.rowIndex="5" GridPane.columnIndex="2"/>
-
-                <Label text="VPN 流量:" GridPane.rowIndex="6" GridPane.columnIndex="0"/>
-                <Label fx:id="vpnTrafficLabel" text="-" GridPane.rowIndex="6" GridPane.columnIndex="1"/>
-                <Button text="刷新" onAction="#handleRefreshTraffic" GridPane.rowIndex="6" GridPane.columnIndex="2"/>
-
-                <Label text="可分享地址:" GridPane.rowIndex="7" GridPane.columnIndex="0"/>
-                <TextArea fx:id="selfAddrsArea" editable="false" wrapText="true" prefRowCount="2"
-                          style="-fx-font-family: 'Consolas', 'Monaco', monospace;" GridPane.rowIndex="7" GridPane.columnIndex="1"/>
-                <Button text="复制" onAction="#handleCopyShareAddrs" GridPane.rowIndex="7" GridPane.columnIndex="2"/>
-
-                <Label text="Relay 节点:" GridPane.rowIndex="8" GridPane.columnIndex="0"/>
-                <TextField fx:id="relayMultiaddrField" promptText="/ip4/.../tcp/.../p2p/..." GridPane.rowIndex="8" GridPane.columnIndex="1"/>
-                <Button text="预约" onAction="#handleRelayReserveNow" GridPane.rowIndex="8" GridPane.columnIndex="2"/>
-
-                <Label text="Relay 状态:" GridPane.rowIndex="9" GridPane.columnIndex="0"/>
-                <Label fx:id="relayStatusLabel" text="-" GridPane.rowIndex="9" GridPane.columnIndex="1"/>
-                <Button text="刷新" onAction="#handleRefreshRelay" GridPane.rowIndex="9" GridPane.columnIndex="2"/>
-
-                <Label text="Relay 地址:" GridPane.rowIndex="10" GridPane.columnIndex="0"/>
-                <TextArea fx:id="relayAddrsArea" editable="false" wrapText="true" prefRowCount="2"
-                          style="-fx-font-family: 'Consolas', 'Monaco', monospace;" GridPane.rowIndex="10" GridPane.columnIndex="1"/>
-                <Button text="复制" onAction="#handleCopyRelayAddrs" GridPane.rowIndex="10" GridPane.columnIndex="2"/>
-
-                <Label text="mDNS 发现:" GridPane.rowIndex="11" GridPane.columnIndex="0"/>
-                <Label fx:id="mdnsStatusLabel" text="-" GridPane.rowIndex="11" GridPane.columnIndex="1"/>
-                <Button text="刷新" onAction="#handleRefreshMdns" GridPane.rowIndex="11" GridPane.columnIndex="2"/>
-
-                <Label text="STUN(UDP):" GridPane.rowIndex="12" GridPane.columnIndex="0"/>
-                <Label fx:id="stunStatusLabel" text="-" GridPane.rowIndex="12" GridPane.columnIndex="1"/>
-                <Button text="刷新" onAction="#handleRefreshStun" GridPane.rowIndex="12" GridPane.columnIndex="2"/>
-            </GridPane>
-
-
-        </VBox>
+            <Label text="状态:" />
+            <Label fx:id="statusLabel" text="就绪" />
+        </HBox>
     </top>
 
     <center>
-        <VBox spacing="8">
-            <padding>
-                <Insets top="0" right="10" bottom="10" left="10"/>
-            </padding>
-            <TextArea fx:id="chatHistoryArea" wrapText="true"
-                      style="-fx-font-family: 'Consolas', 'Monaco', monospace;"
-                      VBox.vgrow="ALWAYS"/>
-        </VBox>
-    </center>
+        <TabPane tabClosingPolicy="UNAVAILABLE">
 
-    <bottom>
-        <HBox spacing="10" alignment="CENTER_LEFT">
-            <padding>
-                <Insets top="10" right="10" bottom="10" left="10"/>
-            </padding>
-            <TextField fx:id="messageInputField" promptText="输入消息，回车发送" onAction="#handleSend" HBox.hgrow="ALWAYS"/>
-            <Button text="发送" onAction="#handleSend"/>
-        </HBox>
-    </bottom>
+            <Tab text="聊天">
+                <VBox spacing="10">
+                    <padding>
+                        <Insets top="8" right="10" bottom="10" left="10"/>
+                    </padding>
+
+                    <TextArea fx:id="chatHistoryArea" wrapText="true"
+                              style="-fx-font-family: 'Consolas', 'Monaco', monospace;"
+                              VBox.vgrow="ALWAYS" />
+
+                    <HBox spacing="10" alignment="CENTER_LEFT">
+                        <TextField fx:id="messageInputField" promptText="输入消息，回车发送" onAction="#handleSend" HBox.hgrow="ALWAYS" />
+                        <Button text="发送" onAction="#handleSend" />
+                    </HBox>
+                </VBox>
+            </Tab>
+
+            <Tab text="连接">
+                <VBox spacing="10">
+                    <padding>
+                        <Insets top="8" right="10" bottom="10" left="10"/>
+                    </padding>
+
+                    <GridPane hgap="10" vgap="10">
+                        <columnConstraints>
+                            <ColumnConstraints percentWidth="18" />
+                            <ColumnConstraints percentWidth="62" />
+                            <ColumnConstraints percentWidth="20" />
+                        </columnConstraints>
+
+                        <Label text="对方 PeerID:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+                        <TextField fx:id="remotePeerIdField" promptText="输入对方 PeerID" GridPane.rowIndex="0" GridPane.columnIndex="1" />
+                        <Button text="连接" onAction="#handleConnect" GridPane.rowIndex="0" GridPane.columnIndex="2" />
+
+                        <Label text="对方地址:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+                        <TextField fx:id="remoteMultiaddrField" promptText="可选：/ip4/.../tcp/.../p2p/... 或 /.../p2p-circuit/p2p/..." GridPane.rowIndex="1" GridPane.columnIndex="1" />
+                        <Label text="" GridPane.rowIndex="1" GridPane.columnIndex="2" />
+
+                        <Label text="连接方式:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
+                        <ComboBox fx:id="connectModeCombo" GridPane.rowIndex="2" GridPane.columnIndex="1" maxWidth="Infinity" />
+                        <Button text="Bootstrap" onAction="#handleBootstrapNow" GridPane.rowIndex="2" GridPane.columnIndex="2" />
+
+                        <Label text="Bootstrap状态:" GridPane.rowIndex="3" GridPane.columnIndex="0" />
+                        <Label fx:id="bootstrapStatusLabel" text="-" GridPane.rowIndex="3" GridPane.columnIndex="1" />
+                        <Button text="刷新" onAction="#handleRefreshBootstrap" GridPane.rowIndex="3" GridPane.columnIndex="2" />
+
+                        <Label text="公网(Google):" GridPane.rowIndex="4" GridPane.columnIndex="0" />
+                        <Label fx:id="googleStatusLabel" text="未检测" GridPane.rowIndex="4" GridPane.columnIndex="1" />
+                        <Button text="检测" onAction="#handleCheckGoogle" GridPane.rowIndex="4" GridPane.columnIndex="2" />
+
+                        <Label text="mDNS 发现:" GridPane.rowIndex="5" GridPane.columnIndex="0" />
+                        <Label fx:id="mdnsStatusLabel" text="-" GridPane.rowIndex="5" GridPane.columnIndex="1" />
+                        <Button text="刷新" onAction="#handleRefreshMdns" GridPane.rowIndex="5" GridPane.columnIndex="2" />
+
+                        <Label text="STUN(UDP):" GridPane.rowIndex="6" GridPane.columnIndex="0" />
+                        <Label fx:id="stunStatusLabel" text="-" GridPane.rowIndex="6" GridPane.columnIndex="1" />
+                        <Button text="刷新" onAction="#handleRefreshStun" GridPane.rowIndex="6" GridPane.columnIndex="2" />
+                    </GridPane>
+
+                    <Label text="提示：优先直连（局域网/mDNS/已缓存地址），必要时使用 /p2p-circuit 地址兜底。" />
+                </VBox>
+            </Tab>
+
+            <Tab text="地址 / Relay">
+                <VBox spacing="10">
+                    <padding>
+                        <Insets top="8" right="10" bottom="10" left="10"/>
+                    </padding>
+
+                    <GridPane hgap="10" vgap="10">
+                        <columnConstraints>
+                            <ColumnConstraints percentWidth="18" />
+                            <ColumnConstraints percentWidth="62" />
+                            <ColumnConstraints percentWidth="20" />
+                        </columnConstraints>
+
+                        <Label text="可分享地址:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+                        <TextArea fx:id="selfAddrsArea" editable="false" wrapText="true" prefRowCount="3"
+                                  style="-fx-font-family: 'Consolas', 'Monaco', monospace;" GridPane.rowIndex="0" GridPane.columnIndex="1" />
+                        <Button text="复制" onAction="#handleCopyShareAddrs" GridPane.rowIndex="0" GridPane.columnIndex="2" />
+
+                        <Label text="Relay 节点:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+                        <TextField fx:id="relayMultiaddrField" promptText="/ip4/.../tcp/.../p2p/..." GridPane.rowIndex="1" GridPane.columnIndex="1" />
+                        <Button text="预约" onAction="#handleRelayReserveNow" GridPane.rowIndex="1" GridPane.columnIndex="2" />
+
+                        <Label text="Relay 状态:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
+                        <Label fx:id="relayStatusLabel" text="-" GridPane.rowIndex="2" GridPane.columnIndex="1" />
+                        <Button text="刷新" onAction="#handleRefreshRelay" GridPane.rowIndex="2" GridPane.columnIndex="2" />
+
+                        <Label text="Relay 地址:" GridPane.rowIndex="3" GridPane.columnIndex="0" />
+                        <TextArea fx:id="relayAddrsArea" editable="false" wrapText="true" prefRowCount="3"
+                                  style="-fx-font-family: 'Consolas', 'Monaco', monospace;" GridPane.rowIndex="3" GridPane.columnIndex="1" />
+                        <Button text="复制" onAction="#handleCopyRelayAddrs" GridPane.rowIndex="3" GridPane.columnIndex="2" />
+                    </GridPane>
+
+                    <Label text="说明：对方若无法直连你，需要你把 ‘Relay 地址’ 发给对方（它才能通过 /p2p-circuit 连到你）。" />
+                </VBox>
+            </Tab>
+
+            <Tab text="VPN">
+                <VBox spacing="10">
+                    <padding>
+                        <Insets top="8" right="10" bottom="10" left="10"/>
+                    </padding>
+
+                    <GridPane hgap="10" vgap="10">
+                        <columnConstraints>
+                            <ColumnConstraints percentWidth="18" />
+                            <ColumnConstraints percentWidth="62" />
+                            <ColumnConstraints percentWidth="20" />
+                        </columnConstraints>
+
+                        <Label text="虚拟 VPN:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+                        <CheckBox fx:id="vpnEnabledCheck" text="启用（需要管理员权限）" onAction="#handleToggleVpn" GridPane.rowIndex="0" GridPane.columnIndex="1" />
+                        <Label fx:id="vpnStatusLabel" text="-" GridPane.rowIndex="0" GridPane.columnIndex="2" />
+
+                        <Label text="虚拟IP:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+                        <TextField fx:id="vpnIpField" promptText="例如 10.8.0.3" GridPane.rowIndex="1" GridPane.columnIndex="1" />
+                        <Button text="应用" onAction="#handleApplyVpnIpMask" GridPane.rowIndex="1" GridPane.columnIndex="2" />
+
+                        <Label text="Mask:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
+                        <TextField fx:id="vpnMaskField" promptText="例如 255.255.255.0" GridPane.rowIndex="2" GridPane.columnIndex="1" />
+                        <Label text="" GridPane.rowIndex="2" GridPane.columnIndex="2" />
+
+                        <Label text="目标 PeerID:" GridPane.rowIndex="3" GridPane.columnIndex="0" />
+                        <ComboBox fx:id="vpnTargetPeerIdCombo" editable="true" maxWidth="Infinity" GridPane.rowIndex="3" GridPane.columnIndex="1" />
+                        <Button text="应用" onAction="#handleApplyVpnTarget" GridPane.rowIndex="3" GridPane.columnIndex="2" />
+
+                        <Label text="指定状态:" GridPane.rowIndex="4" GridPane.columnIndex="0" />
+                        <Label fx:id="vpnTargetStatusLabel" text="-" GridPane.rowIndex="4" GridPane.columnIndex="1" />
+                        <Label text="" GridPane.rowIndex="4" GridPane.columnIndex="2" />
+
+                        <Label text="VPN 流量:" GridPane.rowIndex="5" GridPane.columnIndex="0" />
+                        <Label fx:id="vpnTrafficLabel" text="-" GridPane.rowIndex="5" GridPane.columnIndex="1" />
+                        <Label text="" GridPane.rowIndex="5" GridPane.columnIndex="2" />
+                    </GridPane>
+
+                    <Label text="提示：启用后会创建/打开名为 KK-VPN 的虚拟网卡，并把出站包通过 P2P 发送到目标节点。状态每 1 秒自动监测。" />
+                </VBox>
+            </Tab>
+
+            <Tab text="设置">
+                <VBox spacing="8">
+                    <padding>
+                        <Insets top="8" right="10" bottom="10" left="10"/>
+                    </padding>
+
+                    <HBox spacing="10" alignment="CENTER_LEFT">
+                        <Label text="配置说明（可直接复制到 application.yml）:" />
+                        <Button text="复制" onAction="#handleCopySettings" />
+                    </HBox>
+
+                    <TextArea fx:id="settingsArea" editable="false" wrapText="false" prefRowCount="18"
+                              style="-fx-font-family: 'Consolas', 'Monaco', monospace;" VBox.vgrow="ALWAYS" />
+                </VBox>
+            </Tab>
+
+        </TabPane>
+    </center>
 
 </BorderPane>
