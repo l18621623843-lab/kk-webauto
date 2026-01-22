@@ -20,11 +20,18 @@ spring:
 # ===================== 日志配置 =====================
 logging:
   level:
-    # 全局日志级别
+    # 全局日志级别（建议保持 INFO，避免 JDK/TLS 等日志刷屏）
     root: INFO
 
     # 本项目包日志级别（调试 P2P/GUI 时建议 DEBUG）
     com.kk: DEBUG
+
+    # 抑制 JDK TLS/证书 debug 噪音（root=DEBUG 时会非常多）
+    jdk.event.security: WARN
+
+    # libp2p 关键链路日志（排查 relay 预约/协议协商卡住时打开）
+    io.libp2p.protocol.circuit: DEBUG
+    io.libp2p.core.multistream: DEBUG
 
   pattern:
     # 控制台日志格式
@@ -32,7 +39,7 @@ logging:
 
   file:
     # 输出到文件（相对路径基于工作目录）
-    name: logs/kk-webauto.log
+    name: logs/kk-platform.log
 
   logback:
     rollingpolicy:
@@ -115,7 +122,7 @@ kk:
       mode: CLIENT
 
       # 连接 relay 的超时（秒）
-      connectTimeoutSeconds: 8
+      connectTimeoutSeconds: 20
 
       # relay 节点地址列表（逗号/换行分隔），每个必须包含 /p2p/<relayPeerId>
       # 示例：/ip4/1.2.3.4/tcp/4001/p2p/12D3KooW...
@@ -159,7 +166,7 @@ kk:
 
     webrtc:
       # 是否启用 WebRTC 数据面（DataChannel + ICE/STUN/TURN）
-      enabled: true
+      enabled: false
 
       prefer:
         # Chat 是否优先走 WebRTC-UDP（失败会自动回落到 libp2p）

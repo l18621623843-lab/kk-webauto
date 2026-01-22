@@ -245,9 +245,22 @@ public class Libp2pEngine {
 
         @Override
         public java.util.Optional<CircuitHopProtocol.Reservation> createReservation(PeerId requestor, Multiaddr addr) {
-            java.util.Optional<CircuitHopProtocol.Reservation> r = delegate.createReservation(requestor, addr);
+            long t0 = System.currentTimeMillis();
             try {
-                log.info("Relay(HOP): reserve 请求 from={} addr={} => {}", (requestor == null ? "-" : requestor.toBase58()), (addr == null ? "-" : addr.toString()), (r.isPresent() ? "ACCEPT" : "REJECT"));
+                log.info("Relay(HOP): reserve 请求 START from={} addr={}", (requestor == null ? "-" : requestor.toBase58()), (addr == null ? "-" : addr.toString()));
+            } catch (Exception ignore) {
+            }
+
+            java.util.Optional<CircuitHopProtocol.Reservation> r;
+            try {
+                r = delegate.createReservation(requestor, addr);
+            } catch (Exception e) {
+                log.warn("Relay(HOP): reserve 请求 EX from={} addr={} ({})", (requestor == null ? "-" : requestor.toBase58()), (addr == null ? "-" : addr.toString()), summarize(e));
+                throw e;
+            }
+
+            try {
+                log.info("Relay(HOP): reserve 请求 END from={} addr={} => {} (costMs={})", (requestor == null ? "-" : requestor.toBase58()), (addr == null ? "-" : addr.toString()), (r.isPresent() ? "ACCEPT" : "REJECT"), (System.currentTimeMillis() - t0));
             } catch (Exception ignore) {
             }
             return r;
@@ -255,13 +268,27 @@ public class Libp2pEngine {
 
         @Override
         public java.util.Optional<CircuitHopProtocol.Reservation> allowConnection(PeerId target, PeerId initiator) {
-            java.util.Optional<CircuitHopProtocol.Reservation> r = delegate.allowConnection(target, initiator);
+            long t0 = System.currentTimeMillis();
             try {
-                log.info("Relay(HOP): hop 转发请求 target={} initiator={} => {}", (target == null ? "-" : target.toBase58()), (initiator == null ? "-" : initiator.toBase58()), (r.isPresent() ? "ALLOW" : "DENY"));
+                log.info("Relay(HOP): hop 转发请求 START target={} initiator={}", (target == null ? "-" : target.toBase58()), (initiator == null ? "-" : initiator.toBase58()));
+            } catch (Exception ignore) {
+            }
+
+            java.util.Optional<CircuitHopProtocol.Reservation> r;
+            try {
+                r = delegate.allowConnection(target, initiator);
+            } catch (Exception e) {
+                log.warn("Relay(HOP): hop 转发请求 EX target={} initiator={} ({})", (target == null ? "-" : target.toBase58()), (initiator == null ? "-" : initiator.toBase58()), summarize(e));
+                throw e;
+            }
+
+            try {
+                log.info("Relay(HOP): hop 转发请求 END target={} initiator={} => {} (costMs={})", (target == null ? "-" : target.toBase58()), (initiator == null ? "-" : initiator.toBase58()), (r.isPresent() ? "ALLOW" : "DENY"), (System.currentTimeMillis() - t0));
             } catch (Exception ignore) {
             }
             return r;
         }
+
     }
 
 
@@ -562,21 +589,30 @@ public class Libp2pEngine {
             return;
         }
 
+        boolean hopHostBound = false;
+        boolean rtHostBound = false;
+        boolean stopTransportBound = false;
+        boolean rtInitialized = false;
+
         // CircuitHopProtocol.Binding 实现了 HostConsumer，必须 setHost 才能处理 reserve/hop。
         if (circuitHopBinding != null) {
             try {
                 circuitHopBinding.setHost(h);
+                hopHostBound = true;
             } catch (Exception e) {
-                log.debug("circuitHopBinding.setHost 失败: {}", e.toString());
+                log.warn("circuitHopBinding.setHost 失败: {}", summarize(e));
             }
+        } else {
+            log.warn("circuitHopBinding is null，relay reserve/hop 可能不可用");
         }
 
         RelayTransport rt = relayTransport;
         if (rt != null) {
             try {
                 rt.setHost(h);
+                rtHostBound = true;
             } catch (Exception e) {
-                log.debug("relayTransport.setHost 失败: {}", e.toString());
+                log.warn("relayTransport.setHost 失败: {}", summarize(e));
             }
         }
 
@@ -584,8 +620,9 @@ public class Libp2pEngine {
         if (circuitStopBinding != null && rt != null) {
             try {
                 circuitStopBinding.setTransport(rt);
+                stopTransportBound = true;
             } catch (Exception e) {
-                log.debug("circuitStopBinding.setTransport 失败: {}", e.toString());
+                log.warn("circuitStopBinding.setTransport 失败: {}", summarize(e));
             }
         }
 
@@ -593,10 +630,14 @@ public class Libp2pEngine {
         if (rt != null) {
             try {
                 rt.initialize();
+                rtInitialized = true;
             } catch (Exception e) {
-                log.debug("relayTransport.initialize 失败: {}", e.toString());
+                log.warn("relayTransport.initialize 失败: {}", summarize(e));
             }
         }
+
+        // 这条日志很关键：用于确认 HOP 端是否真的“把 host 注入到 circuit 组件里”
+        log.info("circuit 组件绑定结果: hopHostBound={} rtHostBound={} stopTransportBound={} rtInitialized={}", hopHostBound, rtHostBound, stopTransportBound, rtInitialized);
     }
 
 
@@ -1374,29 +1415,52 @@ public class Libp2pEngine {
                 .orTimeout(relayConnectTimeoutSeconds, TimeUnit.SECONDS)
                 .thenCompose(conn -> {
                     relayConnectedAtMs.put(relayPeerKey, System.currentTimeMillis());
-                    log.info("已连接 relay: {} (peerId={})", relayMultiaddr, relayPeerKey);
+                    try {
+                        log.info("已连接 relay: {} (peerId={}, remoteAddr={})", relayMultiaddr, relayPeerKey, (conn.remoteAddress() == null ? "-" : conn.remoteAddress().toString()));
+                    } catch (Exception ignore) {
+                        log.info("已连接 relay: {} (peerId={})", relayMultiaddr, relayPeerKey);
+                    }
 
                     // createStream / reserve 如果不加超时，会出现“已连接但无后续日志”的假死现象
                     return conn.muxerSession()
                             .createStream(circuitHopBinding)
                             .getController()
-                            .orTimeout(relayConnectTimeoutSeconds, TimeUnit.SECONDS);
+                            .orTimeout(relayConnectTimeoutSeconds, TimeUnit.SECONDS)
+                            .thenApply(ctrl -> {
+                                log.info("已打开 relay 控制流(准备发送 RESERVE): relayPeerId={}", relayPeerKey);
+                                return ctrl;
+                            });
                 })
-                .thenCompose(ctrl -> ctrl.reserve()
-                        .orTimeout(relayConnectTimeoutSeconds, TimeUnit.SECONDS)
-                        .thenAccept(res -> {
-                            long expiryEpoch = 0L;
-                            try {
-                                expiryEpoch = res.expiry.toEpochSecond(java.time.ZoneOffset.UTC);
-                            } catch (Exception ignore) {
+                .thenCompose(ctrl -> {
+                    log.info("发送 RESERVE 请求: relayPeerId={}", relayPeerKey);
+
+                    CompletableFuture<CircuitHopProtocol.Reservation> reserveFuture = ctrl.reserve();
+                    try {
+                        int warnAfter = Math.min(relayConnectTimeoutSeconds, 10);
+                        relayScheduler.schedule(() -> {
+                            if (!reserveFuture.isDone()) {
+                                log.warn("RESERVE 仍未返回: relayPeerId={} (waited={}s)", relayPeerKey, warnAfter);
                             }
+                        }, warnAfter, TimeUnit.SECONDS);
+                    } catch (Exception ignore) {
+                    }
 
-                            relayReservations.put(relayPeerKey, new RelayReservation(addr, ctrl, expiryEpoch));
-                            relayReserved.set(relayReservations.size());
+                    return reserveFuture
+                            .orTimeout(relayConnectTimeoutSeconds, TimeUnit.SECONDS)
+                            .thenAccept(res -> {
+                                long expiryEpoch = 0L;
+                                try {
+                                    expiryEpoch = res.expiry.toEpochSecond(java.time.ZoneOffset.UTC);
+                                } catch (Exception ignore) {
+                                }
 
-                            String circuitAddr = toCircuitAddr(addr.toString(), selfPeerId == null ? "" : selfPeerId.toBase58());
-                            log.info("relay 预约成功: relayPeerId={} expiryEpoch={} circuitAddr={}", relayPeerKey, expiryEpoch, circuitAddr);
-                        }))
+                                relayReservations.put(relayPeerKey, new RelayReservation(addr, ctrl, expiryEpoch));
+                                relayReserved.set(relayReservations.size());
+
+                                String circuitAddr = toCircuitAddr(addr.toString(), selfPeerId == null ? "" : selfPeerId.toBase58());
+                                log.info("relay 预约成功: relayPeerId={} expiryEpoch={} circuitAddr={}", relayPeerKey, expiryEpoch, circuitAddr);
+                            });
+                })
                 .whenComplete((v, ex) -> relayReserveInflight.remove(relayPeerKey))
                 .exceptionally(ex -> {
                     lastRelayError = summarize(ex);
@@ -1404,6 +1468,7 @@ public class Libp2pEngine {
                     log.debug("relay 预约失败堆栈: {}", relayMultiaddr, ex);
                     throw new RuntimeException(ex);
                 });
+
 
         relayReserveInflight.put(relayPeerKey, f);
         return f;
@@ -2350,17 +2415,16 @@ public class Libp2pEngine {
                     out.add(Multiaddr.fromString(ensureP2pComponent(replaced, selfPeerId.toBase58())));
                 }
 
-                // 如果本机没有可分享 IPv6（常见：只有 link-local），则退化输出 IPv4 分享地址（局域网更常用）
-                if (out.isEmpty()) {
-                    Integer port = extractTcpPort(s);
-                    if (port != null) {
-                        for (String ip4 : localIpv4s) {
-                            String replaced = "/ip4/" + ip4 + "/tcp/" + port;
-                            out.add(Multiaddr.fromString(ensureP2pComponent(replaced, selfPeerId.toBase58())));
-                        }
+                // 同时补充 IPv4 分享地址（很多环境对 IPv4 更友好；也避免部分实现对 IPv6 multiaddr 兼容性问题）
+                Integer port = extractTcpPort(s);
+                if (port != null) {
+                    for (String ip4 : localIpv4s) {
+                        String replaced = "/ip4/" + ip4 + "/tcp/" + port;
+                        out.add(Multiaddr.fromString(ensureP2pComponent(replaced, selfPeerId.toBase58())));
                     }
                 }
                 continue;
+
             }
 
             out.add(Multiaddr.fromString(ensureP2pComponent(s, selfPeerId.toBase58())));
